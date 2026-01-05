@@ -43,10 +43,11 @@ function network_test() {
     # 测试直连
     echo -e "\e[34m正在测试直连...\e[0m"
     local curl_output
-    curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time $((timeout * 3)) -o /dev/null -s -w "%{http_code}:%{exitcode}:%{speed_download}" "${check_url}")
+    curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time $((timeout * 3)) -o /dev/null -s -w "%{http_code}:%{speed_download}" "${check_url}")
     local status=$(echo "${curl_output}" | cut -d: -f1)
-    local curl_exit_code=$(echo "${curl_output}" | cut -d: -f2)
-    local download_speed=$(echo "${curl_output}" | cut -d: -f3 | cut -d. -f1)
+    local download_speed=$(echo "${curl_output}" | cut -d: -f2 | cut -d. -f1)
+    local curl_exit_code=0
+    [ "${status}" != "000" ] && [ -n "${download_speed}" ] && curl_exit_code=0 || curl_exit_code=1
 
     if [ "${curl_exit_code}" -eq 0 ] && [ "${status}" -eq 200 ]; then
         local formatted_speed=$(format_speed "${download_speed}")
@@ -62,10 +63,11 @@ function network_test() {
         proxy=${proxy%/}
         local test_url="${proxy}/${check_url}"
         
-        curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time $((timeout * 3)) -o /dev/null -s -w "%{http_code}:%{exitcode}:%{speed_download}" "${test_url}")
+        curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time $((timeout * 3)) -o /dev/null -s -w "%{http_code}:%{speed_download}" "${test_url}")
         status=$(echo "${curl_output}" | cut -d: -f1)
-        curl_exit_code=$(echo "${curl_output}" | cut -d: -f2)
-        download_speed=$(echo "${curl_output}" | cut -d: -f3 | cut -d. -f1)
+        download_speed=$(echo "${curl_output}" | cut -d: -f2 | cut -d. -f1)
+        curl_exit_code=0
+        [ "${status}" != "000" ] && [ -n "${download_speed}" ] && curl_exit_code=0 || curl_exit_code=1
 
         if [ "${curl_exit_code}" -eq 0 ] && [ "${status}" -eq 200 ]; then
             local formatted_speed=$(format_speed "${download_speed}")
