@@ -57,6 +57,7 @@ if [ -f "$PLUGIN_CONFIG" ]; then JS_MODS_DIR=$(cat "$PLUGIN_CONFIG"); else
     if [ "$EUID" -eq 0 ]; then JS_MODS_DIR="/root/L4D2_Plugins"; else JS_MODS_DIR="$HOME/L4D2_Plugins"; fi
 fi
 STEAMCMD_DIR="${FINAL_ROOT}/steamcmd_common"
+SERVER_CACHE_DIR="${FINAL_ROOT}/server_cache"
 TRAFFIC_DIR="${FINAL_ROOT}/traffic_logs"
 BACKUP_DIR="${FINAL_ROOT}/backups"
 DEFAULT_APPID="222860"
@@ -176,6 +177,8 @@ load_i18n() {
         M_CONN_OFFICIAL="${CYAN}正在连接官网(sourcemod.net)获取最新版本...${NC}"
         M_GET_LINK_FAIL="${RED}[FAILED] 无法获取下载链接，请检查网络或手动下载。${NC}"
         M_FOUND_EXISTING="检测到系统已安装 L4M，正在启动..."
+        M_UPDATE_CACHE="${CYAN}正在更新服务端缓存 (首次可能较慢)...${NC}"
+        M_COPY_CACHE="${CYAN}正在从缓存部署实例 (本地复制)...${NC}"
     else
         M_TITLE="=== L4D2 Manager (L4M) ==="
         M_WELCOME="Welcome to L4D2 Server Manager (L4M)"
@@ -288,6 +291,8 @@ load_i18n() {
         M_CONN_OFFICIAL="${CYAN}Connecting to sourcemod.net...${NC}"
         M_GET_LINK_FAIL="${RED}[FAILED] Cannot get link, check network.${NC}"
         M_FOUND_EXISTING="Detected existing L4M installation, launching..."
+        M_UPDATE_CACHE="${CYAN}Updating server cache (might take time)...${NC}"
+        M_COPY_CACHE="${CYAN}Deploying from cache (local copy)...${NC}"
     fi
 }
 
@@ -562,40 +567,59 @@ deploy_wizard() {
     tui_header; echo "$M_LOGIN_ANON"; echo "$M_LOGIN_ACC"
     local mode; tui_input "$M_SELECT_1_2" "1" "mode"
     
-    mkdir -p "$path"; install_steamcmd
-    echo -e "$M_START_DL"
-    local script="${path}/update.txt"
+    # 1. Update Cache
+    install_steamcmd
+    mkdir -p "$SERVER_CACHE_DIR"
+    echo -e "$M_UPDATE_CACHE"
+    
+    # Force UTF-8 for SteamCMD
+    export LANG=en_US.UTF-8; export LC_ALL=en_US.UTF-8
+    
+    local cache_script="${SERVER_CACHE_DIR}/update_cache.txt"
     if [ "$mode" == "2" ]; then
         local u p; tui_input "$M_ACC" "" "u"; tui_input "$M_PASS" "" "p" "true"
-        echo "force_install_dir \"$path\"" > "$script"
-        echo "login $u $p" >> "$script"
-        echo "@sSteamCmdForcePlatformType linux" >> "$script"
-        echo "app_update $DEFAULT_APPID validate" >> "$script"
-        echo "quit" >> "$script"
-        "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$script" | grep -v "CHTTPClientThreadPool"
+        echo "force_install_dir \"$SERVER_CACHE_DIR\"" > "$cache_script"
+        echo "login $u $p" >> "$cache_script"
+        echo "@sSteamCmdForcePlatformType linux" >> "$cache_script"
+        echo "app_update $DEFAULT_APPID validate" >> "$cache_script"
+        echo "quit" >> "$cache_script"
+        "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$cache_script" | grep -v "CHTTPClientThreadPool"
     else
-        echo "force_install_dir \"$path\"" > "$script"
-        echo "login anonymous" >> "$script"
-        echo "@sSteamCmdForcePlatformType linux" >> "$script"
-        echo "app_info_update 1" >> "$script"
-        echo "app_update $DEFAULT_APPID" >> "$script"
-        echo "@sSteamCmdForcePlatformType windows" >> "$script"
-        echo "app_info_update 1" >> "$script"
-        echo "app_update $DEFAULT_APPID" >> "$script"
-        echo "@sSteamCmdForcePlatformType linux" >> "$script"
-        echo "app_info_update 1" >> "$script"
-        echo "app_update $DEFAULT_APPID validate" >> "$script"
-        echo "quit" >> "$script"
-        "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$script" | grep -v "CHTTPClientThreadPool"
+        echo "force_install_dir \"$SERVER_CACHE_DIR\"" > "$cache_script"
+        echo "login anonymous" >> "$cache_script"
+        echo "@sSteamCmdForcePlatformType linux" >> "$cache_script"
+        echo "app_info_update 1" >> "$cache_script"
+        echo "app_update $DEFAULT_APPID" >> "$cache_script"
+        echo "@sSteamCmdForcePlatformType windows" >> "$cache_script"
+        echo "app_info_update 1" >> "$cache_script"
+        echo "app_update $DEFAULT_APPID" >> "$cache_script"
+        echo "@sSteamCmdForcePlatformType linux" >> "$cache_script"
+        echo "app_info_update 1" >> "$cache_script"
+        echo "app_update $DEFAULT_APPID validate" >> "$cache_script"
+        echo "quit" >> "$cache_script"
+        "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$cache_script" | grep -v "CHTTPClientThreadPool"
     fi
     
-    if [ ! -f "${path}/srcds_run" ]; then
+    # 2. Deploy from Cache
+    if [ ! -f "${SERVER_CACHE_DIR}/srcds_run" ]; then
         echo -e "\n${RED}======================================${NC}"
         echo -e "${RED}        $M_FAILED $M_DEPLOY_FAIL             ${NC}"
         echo -e "${RED}======================================${NC}"
         echo -e "$M_NO_SRCDS"
         read -n 1 -s -r; return
     fi
+    
+    echo -e "$M_COPY_CACHE"
+    mkdir -p "$path"
+    # Try reflink for speed/space, fallback to standard copy
+    if ! cp -rf --reflink=auto "$SERVER_CACHE_DIR/"* "$path/" 2>/dev/null; then
+        cp -rf "$SERVER_CACHE_DIR/"* "$path/"
+    fi
+    rm -f "$path/update_cache.txt"
+    
+    # 3. Create local update.txt
+    local script="${path}/update.txt"
+    sed "s|force_install_dir .*|force_install_dir \"$path\"|" "$cache_script" > "$script"
     
     mkdir -p "${path}/left4dead2/cfg"
     if [ ! -f "${path}/left4dead2/cfg/server.cfg" ]; then
