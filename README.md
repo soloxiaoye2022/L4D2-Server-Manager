@@ -1,47 +1,63 @@
-# Server Install Script
-求生之路2服务端一键部署脚本
+# L4D2 Server Manager (L4M)
 
-## 介绍
-适用于求生之路2 (Left 4 Dead 2) 开服和管理插件的脚本集。
-本脚本整合了常用的服务端安装、更新、启动以及插件管理功能。
-部分代码参考或修改自其他开源项目，主体逻辑由 AI 辅助编写，作者进行二次修改和整合。
+一个强大、现代化的求生之路2 (Left 4 Dead 2) 服务器管理工具。
+专为 Linux 环境设计，支持全平台（VPS、物理机、Termux/Proot 容器），提供流畅的 TUI 图形界面和 CLI 命令行操作。
 
-## 系统要求
+## ✨ 核心特性
 
-*   **支持的发行版**：
-    *   Ubuntu 16.04+
-    *   Debian 9+
-    *   CentOS 7+
-*   **架构**：x86_64 (amd64)
+*   **🚀 一键安装 & 持久化**: 自动安装到系统，数据持久保存，防误删。
+*   **💻 强大的 CLI 工具**: 安装后直接使用 `l4m` 命令管理一切，支持自更新 (`l4m update`)。
+*   **🖥️ 现代化 TUI 界面**: 全键盘操作的图形化菜单，告别繁琐的指令输入。
+*   **📦 多实例管理**: 支持部署无限个服务器实例，每个实例独立配置、独立运行。
+*   **🛡️ 进程守护 (Watchdog)**: 基于 `tmux` 的智能守护进程，服务端崩溃后 5 秒自动重启。
+*   **🔌 插件管理**: 内置插件安装/卸载功能，适配多实例路径，支持从 JS-MODS 库一键安装。
+*   **🌐 全平台兼容**: 完美支持 Root 用户、普通用户以及 Termux/Proot/Chroot 容器环境。
 
-## 食用方法
+## 📥 快速开始
 
-### 一键脚本
+在终端中执行以下命令即可一键安装或运行：
 
-**通用（推荐）：**
-```bash
-bash <(curl -s -L https://raw.githubusercontent.com/soloxiaoye2022/server_install/main/server_install/linux/init.sh)
-```
-
-**大陆机器（加速）：**
 ```bash
 bash <(curl -s -L https://gh-proxy.com/https://raw.githubusercontent.com/soloxiaoye2022/server_install/main/server_install/linux/init.sh)
 ```
 
-### 手动安装
-1.  下载仓库中的 `server_install/linux/init.sh` 文件。
-2.  上传至服务器任意目录。
-3.  赋予执行权限并运行：
-    ```bash
-    chmod +x init.sh
-    ./init.sh
-    ```
+脚本会自动检测您的环境：
+- **Root 用户**: 安装到 `/usr/local/l4d2_manager`
+- **普通用户/Termux**: 安装到 `~/.l4d2_manager`
 
-## 更新日志
+## 📖 使用指南
 
-**2026/01/05**
-*   新增 Github 代理测速功能，优化国内下载体验。
-*   优化依赖安装逻辑。
+安装完成后，您可以在任意位置使用 `l4m` 命令：
 
-**2024**
-*   初始化项目。
+```bash
+l4m          # 打开主管理菜单 (TUI)
+l4m update   # 更新管理器到最新版本
+l4m install  # 重新运行安装向导 (修复安装)
+```
+
+### 主要功能模块
+
+1.  **部署新服务器**: 
+    - 交互式向导，只需输入服务器名和路径。
+    - 支持 **匿名登录** 和 **Steam 账号登录** (自动处理 SteamCMD)。
+    - 自动生成优化的 `server.cfg` 和启动脚本。
+
+2.  **服务器管理**:
+    - **启动/停止/重启**: 一键控制，实时反馈状态。
+    - **控制台 (Console)**: 直接进入服务端控制台进行交互 (基于 tmux)，按 `Ctrl+B` 然后按 `D` 即可挂起后台。
+    - **实时日志**: 查看服务端输出。
+    - **启动参数**: TUI 界面直接编辑启动命令 (地图、人数、Tickrate 等)。
+
+3.  **插件管理**:
+    - 自动扫描本地或下载的 JS-MODS 库。
+    - 支持批量选择安装插件。
+    - 一键部署 SourceMod/MetaMod 平台。
+
+## 🔧 高级说明
+
+*   **进程管理**: 本工具使用 `tmux` 替代传统的 `screen`，提供更稳定的会话管理。每个服务器运行在独立的 tmux session 中 (命名为 `l4d2_<服务器名>`)。
+*   **依赖检测**: 启动时会自动检查并尝试安装 `tmux`, `curl`, `lib32gcc` 等必要组件。在非 Root 环境下会提示手动安装或尝试使用 `pkg`。
+
+## 🤝 贡献
+
+欢迎提交 Issue 或 Pull Request 来帮助改进这个工具！
