@@ -303,7 +303,7 @@ function centos() {
     case "${VERSION_ID}" in
         7|8)
             sudo yum update
-            sudo yum install glibc.i686 libstdc++.i686 curl screen zip unzip
+            sudo yum install glibc.i686 libstdc++.i686 curl screen zip unzip tree
         ;;
         *)
             echo -e "\e[34m不支持的系统版本\e[0m \e[31m${VERSION_ID}\e[0m"
@@ -325,10 +325,10 @@ function ubuntu() {
     sudo apt update && \
     case "${VERSION_ID}" in
         16.04|18.04|20.04)
-            sudo apt -y install lib32gcc1 lib32stdc++6 lib32z1-dev curl screen zip unzip
+            sudo apt -y install lib32gcc1 lib32stdc++6 lib32z1-dev curl screen zip unzip tree
         ;;
         22.04|24.04)
-            sudo apt -y install lib32gcc-s1 lib32stdc++6 lib32z1-dev curl screen zip unzip
+            sudo apt -y install lib32gcc-s1 lib32stdc++6 lib32z1-dev curl screen zip unzip tree
         ;;
         *)
             echo -e "\e[34m不支持的系统版本\e[0m \e[31m${VERSION_ID}\e[0m"
@@ -350,10 +350,10 @@ function debian() {
     sudo apt update && \
     case "${VERSION_ID}" in
         9|10)
-            sudo apt -y install lib32gcc1 lib32stdc++6 lib32z1-dev curl screen zip unzip
+            sudo apt -y install lib32gcc1 lib32stdc++6 lib32z1-dev curl screen zip unzip tree
         ;;
         11|12)
-            sudo apt -y install lib32gcc-s1 lib32stdc++6 lib32z1-dev curl screen zip unzip
+            sudo apt -y install lib32gcc-s1 lib32stdc++6 lib32z1-dev curl screen zip unzip tree
         ;;
         *)
             echo -e "\e[34m不支持的系统版本\e[0m \e[31m${VERSION_ID}\e[0m"
@@ -800,7 +800,7 @@ subfolde=()
 if [ -d "$folder_path" ]; then
     while IFS= read -r -d '' subfolder; do
         subfolders+=("$subfolder")
-    done < <(find "$folder_path" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+    done < <(find "$folder_path" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null | sort -z)
 else
     # 尝试自动搜索 JS-MODS
     echo -e "\e[33m默认路径下未找到 JS-MODS，正在尝试自动搜索...\e[0m"
@@ -812,7 +812,7 @@ else
         # 重新加载子目录
         while IFS= read -r -d '' subfolder; do
             subfolders+=("$subfolder")
-        done < <(find "$folder_path" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+        done < <(find "$folder_path" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null | sort -z)
     fi
 fi
 
@@ -820,39 +820,15 @@ if [ ${#subfolders[@]} -eq 0 ]; then
     echo -e "\e[31m未在 JS-MODS 目录下找到可用的插件目录\e[0m"
     echo -e "\e[36m当前检测路径: ${folder_path}\e[0m"
     echo -e "\e[33m请确认结构为: JS-MODS/插件名字/left4dead2/... ，而不是直接把文件放在 JS-MODS 根目录或只上传压缩包\e[0m"
-    
-    echo -e "\e[33m是否安装 tree 命令并显示当前目录结构以辅助调试? (y/n)\e[0m"
-    read -r install_tree
-    if [[ "$install_tree" == "y" || "$install_tree" == "Y" ]]; then
-        if command -v apt-get >/dev/null 2>&1; then
-            apt-get update && apt-get install -y tree
-        elif command -v yum >/dev/null 2>&1; then
-            yum install -y tree
-        fi
-        
-        if command -v tree >/dev/null 2>&1; then
-            echo -e "\e[32m当前目录结构 (深度2层):\e[0m"
-            tree -L 2 -N "${DEFAULT_SH}"
-            echo -e "\e[32m提示: 请找到您的 JS-MODS 文件夹位置，并确保它在上述结构中。\e[0m"
-        else
-            echo -e "\e[31mtree 命令安装失败，尝试使用 ls 显示目录:\e[0m"
-            ls -R "${DEFAULT_SH}" | head -n 50
-        fi
-    fi
-    
     return 1
 fi
 
 count=1
 for subfolder in "${subfolders[@]}"; do
     folder_name=$(basename "$subfolder")
-    if [[ " ${selected_folder[*]} " == *" $folder_name "* ]]; then
-        continue
-    fi
-
-    echo -e "\e[92m$count\e[0m.\e[34m$folder_name\e[0m"
+    
+    # 不再跳过已安装的插件，而是全部添加到列表供 TUI 处理状态
     subfolde+=("$folder_name")
-    ((count++))
 done
 }
 
@@ -916,18 +892,35 @@ done
 while true; do
     printf "\033[2J\033[H"
     echo -e "\e[36m当前服务端目录: ${server_root}\e[0m"
-    echo -e "\e[33m使用方向键↑↓或W/S移动，空格选择或取消选择，回车确认，Q退出\e[0m"
+    echo -e "\e[36m插件所在目录: ${folder_path}\e[0m"
+    echo -e "\e[33m↑↓/W/S移动，空格选择，回车安装，V查看文件结构，Q退出\e[0m"
     for ((i=0;i<total;i++)); do
         local mark=" "
+        local installed_mark=""
+        local color="\e[37m" # 默认白色
+        
+        # 检查是否已安装
+        if [[ " ${selected_folder[*]} " == *" ${subfolde[i]} "* ]]; then
+            installed_mark="\e[32m[已安装]\e[0m"
+            color="\e[90m" # 已安装变灰
+        fi
+
         if [ "${selected_flags[i]}" -eq 1 ]; then
             mark="✔"
+            color="\e[32m" # 选中变绿
         fi
+        
         local prefix="  "
         if [ "$i" -eq "$cursor" ]; then
             prefix="> "
+            color="\e[36m" # 高亮选中行
+            if [ "${selected_flags[i]}" -eq 1 ]; then
+                 color="\e[32;1m" # 既选中又高亮
+            fi
         fi
+        
         local num=$((i+1))
-        echo -e "${prefix}[${mark}] ${num}. ${subfolde[i]}"
+        echo -e "${prefix}[${mark}] ${num}. ${color}${subfolde[i]}\e[0m ${installed_mark}"
     done
 
     read -rsn1 key 2>/dev/null || key=""
@@ -942,6 +935,22 @@ while true; do
                 selected_flags[cursor]=1
             fi
             ;;
+        v|V)
+             # 查看当前选中插件的文件结构
+             local current_plugin="${subfolde[cursor]}"
+             local current_path="$folder_path/$current_plugin"
+             if [ -d "$current_path" ]; then
+                 clear
+                 echo -e "\e[36m插件: $current_plugin 的文件结构:\e[0m"
+                 if command -v tree >/dev/null 2>&1; then
+                     tree -N "$current_path"
+                 else
+                     find "$current_path" -maxdepth 3
+                 fi
+                 echo -e "\e[33m按任意键返回列表...\e[0m"
+                 read -rsn1
+             fi
+             ;;
         q|Q)
             echo -e "\e[33m已取消插件选择\e[0m"
             return 1
