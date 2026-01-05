@@ -484,20 +484,25 @@ function first_anonymous_update_server() {
     stop_server
     echo -e "\e[34mleft4dead2\e[0m 安装中 \e[92m...\e[0m"
 
-    if ! "${DEFAULT_SH}/steamcmd/steamcmd.sh" +quit; then
-        echo -e "\e[34mleft4dead2\e[0m \e[31m安装失败（若多次匿名安装失败,建议请账号登录安装）\e[0m"
-        exit 1
-    fi
-
-    if ! "${DEFAULT_SH}/steamcmd/steamcmd.sh" +force_install_dir "${DEFAULT_SH}/steamcmd/${DEFAULT_DIR}" +login anonymous +@sSteamCmdForcePlatformType windows +app_update 222860 validate +quit; then
+    if ! "${DEFAULT_SH}/steamcmd/steamcmd.sh" +force_install_dir "${DEFAULT_SH}/steamcmd/${DEFAULT_DIR}" +login anonymous +@sSteamCmdForcePlatformType linux +app_info_update 1 +quit; then
         echo -e "\e[34mleft4dead2\e[0m \e[31m安装失败（若多次匿名安装失败,建议请账号登录安装）\e[0m"
         exit 1
     else
-        if ! "${DEFAULT_SH}/steamcmd/steamcmd.sh" +force_install_dir "${DEFAULT_SH}/steamcmd/${DEFAULT_DIR}" +login anonymous +@sSteamCmdForcePlatformType linux +app_update 222860 validate +quit; then
-            echo -e "\e[34mleft4dead2\e[0m \e[31m安装失败（若多次匿名安装失败,建议账号登录安装）\e[0m"
+        if ! "${DEFAULT_SH}/steamcmd/steamcmd.sh" +force_install_dir "${DEFAULT_SH}/steamcmd/${DEFAULT_DIR}" +login anonymous +@sSteamCmdForcePlatformType windows +app_info_update 1 +quit; then
+            echo -e "\e[34mleft4dead2\e[0m \e[31m安装失败（若多次匿名安装失败,建议请账号登录安装）\e[0m"
             exit 1
         else
-            echo -e "\e[34mleft4dead2\e[0m \e[92m安装成功\e[0m"
+            if ! "${DEFAULT_SH}/steamcmd/steamcmd.sh" +force_install_dir "${DEFAULT_SH}/steamcmd/${DEFAULT_DIR}" +login anonymous +@sSteamCmdForcePlatformType windows +app_info_update 1 +app_update 222860 validate +quit; then
+                echo -e "\e[34mleft4dead2\e[0m \e[31m安装失败（若多次匿名安装失败,建议请账号登录安装）\e[0m"
+                exit 1
+            else
+                if ! "${DEFAULT_SH}/steamcmd/steamcmd.sh" +force_install_dir "${DEFAULT_SH}/steamcmd/${DEFAULT_DIR}" +login anonymous +@sSteamCmdForcePlatformType linux +app_update 222860 validate +quit; then
+                    echo -e "\e[34mleft4dead2\e[0m \e[31m安装失败（若多次匿名安装失败,建议账号登录安装）\e[0m"
+                    exit 1
+                else
+                    echo -e "\e[34mleft4dead2\e[0m \e[92m安装成功\e[0m"
+                fi
+            fi
         fi
     fi
 }
