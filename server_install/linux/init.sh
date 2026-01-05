@@ -83,14 +83,16 @@ function network_test() {
     
     # 优化代理列表 - 保留速度较好的代理
     local proxy_arr=("https://gh-proxy.com" "https://ghm.078465.xyz" "https://ghfast.top" "https://github.tbedu.top")
-    local check_url="https://github.com/RobLoach/libsteam/archive/master.zip"  # 使用公共库文件进行测速，确保可访问性
+    # 使用 Raw 文件进行测速，避免 zip 下载限制或重定向问题
+    local check_url="https://raw.githubusercontent.com/soloxiaoye2022/server_install/main/README.md"
 
     echo -e "\e[34m开始执行 Github 代理测速...\e[0m"
 
     # 测试直连
     echo -e "\e[34m正在测试直连...\e[0m"
     local curl_output
-    curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time $((timeout * 3)) -o /dev/null -s -w "%{http_code}:%{speed_download}" "${check_url}") || curl_output="000:0"
+    # 增加连接超时到10秒，总超时15秒
+    curl_output=$(curl -k -L --connect-timeout 10 --max-time 15 -o /dev/null -s -w "%{http_code}:%{speed_download}" "${check_url}") || curl_output="000:0"
     local status=$(echo "${curl_output}" | cut -d: -f1)
     local download_speed=$(echo "${curl_output}" | cut -d: -f2 | cut -d. -f1)
     local curl_exit_code=0
@@ -101,7 +103,7 @@ function network_test() {
         echo -e "\e[34m直连速度: \e[92m${formatted_speed}\e[0m"
         best_speed=${download_speed}
     else
-        echo -e "\e[33m直连失败或超时\e[0m"
+        echo -e "\e[33m直连失败或超时 (状态: ${status})\e[0m"
     fi
 
     # 测试代理 - 直接测速
@@ -168,8 +170,14 @@ function ensure_network_test() {
     if [ -n "${SELECTED_PROXY}" ] && [ "$PROXY_URL_BUILT" = false ]; then
         # 大多数GitHub加速代理都支持直接拼接完整URL
         # 格式: https://proxy.com/https://github.com/user/repo...
-        STEAMCMD_BASE_URI="${SELECTED_PROXY}/${STEAMCMD_BASE_URI_ORIGINAL}"
-        QUICK_UPDATE_BASE_PACKAGE="${SELECTED_PROXY}/${QUICK_UPDATE_BASE_PACKAGE_ORIGINAL}"
+        
+        # 强制清除可能存在的代理前缀，防止双重代理
+        # 先恢复到原始定义的URL（硬编码，确保安全）
+        local raw_steam_url="https://github.com/apples1949/SteamCmdLinuxFile/releases/download/steamcmd-latest/steamcmd_linux.tar.gz"
+        local raw_package_url="https://github.com/apples1949/SteamCmdLinuxFile/releases/download/steamcmd-latest/package.tar.gz"
+        
+        STEAMCMD_BASE_URI="${SELECTED_PROXY}/${raw_steam_url}"
+        QUICK_UPDATE_BASE_PACKAGE="${SELECTED_PROXY}/${raw_package_url}"
         
         # Steam CDN使用直连，不通过代理，并测试选择最优源
         echo -e "\e[34mSteam CDN将使用直连，GitHub资源使用代理: \e[92m${SELECTED_PROXY}\e[0m"
