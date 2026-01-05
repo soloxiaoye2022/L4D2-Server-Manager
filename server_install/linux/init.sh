@@ -820,6 +820,34 @@ done
 
 }
 
+ensure_linux_plugin_platform() {
+local base="${DEFAULT_SH}/steamcmd/${DEFAULT_DIR}/left4dead2"
+local linux_metamod="${base}/addons/metamod/bin/server.so"
+local win_metamod="${base}/addons/metamod/bin/server.dll"
+local linux_sm="${base}/addons/sourcemod/bin/sourcemod.so"
+local win_sm="${base}/addons/sourcemod/bin/sourcemod.dll"
+
+if [ ! -d "${base}" ]; then
+    echo -e "\e[31m未检测到已安装的left4dead2服务端目录\e[0m"
+    echo -e "\e[33m请先执行“0.安装依赖并下载服务端”或“2.下载游戏服务端”后再安装插件\e[0m"
+    return 1
+fi
+
+if [ -f "${win_metamod}" ] || [ -f "${win_sm}" ]; then
+    echo -e "\e[31m检测到Windows版插件平台文件(.dll)，当前环境不支持安装Linux插件\e[0m"
+    echo -e "\e[33m请删除Windows版服务端或重新使用本脚本下载安装Linux版服务端和插件平台（菜单9）后再继续\e[0m"
+    return 1
+fi
+
+if [ ! -f "${linux_metamod}" ] || [ ! -f "${linux_sm}" ]; then
+    echo -e "\e[31m未检测到完整的Linux版插件平台\e[0m"
+    echo -e "\e[33m请先通过菜单“9.安装插件平台”安装Linux版插件平台后再安装插件\e[0m"
+    return 1
+fi
+
+return 0
+}
+
 function select_plugins_tui() {
 if [ ${#subfolde[@]} -eq 0 ]; then
     echo -e "\e[31m没有可安装的插件\e[0m"
@@ -923,6 +951,10 @@ return 0
 }
 
 plugins_install() {
+if ! ensure_linux_plugin_platform; then
+    return
+fi
+
 if ! select_plugins_tui; then
     return
 fi
