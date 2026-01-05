@@ -395,7 +395,7 @@ function install_server() {
         fi
     fi
 
-    echo -e "\e[34msteamcmd\e[0m 正在下载Github代理加速源 \e[92m${STEAMCMD_URL}\e[0m"
+    echo -e "\e[34msteamcmd\e[0m 正在使用Github代理加速源 "${SELECTED_PROXY}" \e[92m${STEAMCMD_URL}\e[0m"
     if ! curl -m 180 -fSLo "${TMPDIR}/steamcmd.tar.gz" "${STEAMCMD_URL}"; then
         echo -e "\e[34msteamcmd\e[0m \e[31mGithub代理加速源(${STEAMCMD_URL})下载失败 \e[0m"
         echo -e "\e[34msteamcmd\e[0m 尝试下载官方源\e[92m${STEAMCMD_URL}\e[0m"
