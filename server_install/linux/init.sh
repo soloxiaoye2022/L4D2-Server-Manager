@@ -1000,12 +1000,46 @@ return 0
 }
 
 plugins_install() {
-if ! ensure_linux_plugin_platform; then
+if ! select_plugins_tui; then
     return
 fi
 
-if ! select_plugins_tui; then
-    return
+# 询问是否安装tree并查看文件结构
+echo -e "\e[33m是否使用 tree 命令预览即将安装的插件文件结构? (y/n)\e[0m"
+read -r use_tree
+if [[ "$use_tree" == "y" || "$use_tree" == "Y" ]]; then
+    if ! command -v tree >/dev/null 2>&1; then
+        echo -e "\e[34m正在安装 tree 命令...\e[0m"
+        if command -v apt-get >/dev/null 2>&1; then
+            apt-get update && apt-get install -y tree
+        elif command -v yum >/dev/null 2>&1; then
+            yum install -y tree
+        fi
+    fi
+    
+    if command -v tree >/dev/null 2>&1; then
+        echo -e "\e[32m=== 选定插件文件预览 ===\e[0m"
+        for folder_name in "${selected_folders[@]}"; do
+             # 查找插件真实路径
+             local real_path=""
+             if [ -d "$folder_path/$folder_name" ]; then
+                 real_path="$folder_path/$folder_name"
+             else
+                 # 如果folder_name包含路径(虽然目前逻辑应该是basename)
+                 real_path=$(find "$folder_path" -name "$folder_name" -type d -print -quit)
+             fi
+             
+             if [ -n "$real_path" ] && [ -d "$real_path" ]; then
+                 echo -e "\e[36m插件: $folder_name\e[0m"
+                 tree -N "$real_path"
+                 echo "-------------------"
+             fi
+        done
+        echo -e "\e[33m按回车键继续安装...\e[0m"
+        read -r
+    else
+        echo -e "\e[31m无法安装 tree 命令，跳过预览\e[0m"
+    fi
 fi
 
 for folder_name in "${selected_folders[@]}"; do
@@ -1259,8 +1293,10 @@ function main() {
                 update_server
                 ;;
             7)
-                get_namei
-                plugins_install
+                if ensure_linux_plugin_platform; then
+                    get_namei
+                    plugins_install
+                fi
                 ;;
             8)
                 get_nameii
