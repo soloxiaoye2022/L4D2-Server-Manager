@@ -2,7 +2,7 @@
 
 #=============================================================================
 # L4D2 Server Manager (L4M)
-# 功能: 全平台兼容 (Root/Non-Root/Proot)、多实例管理、CLI/TUI
+# 功能: 全平台兼容 (Root/Non-Root/Proot)、多实例管理、CLI/TUI、自启/备份
 #=============================================================================
 
 # 1. 定义候选安装路径
@@ -13,7 +13,6 @@ USER_BIN="$HOME/bin/l4m"
 UPDATE_URL="https://gh-proxy.com/https://raw.githubusercontent.com/soloxiaoye2022/server_install/main/server_install/linux/init.sh"
 
 # 2. 智能探测运行环境
-# 判断是否是已安装后的运行
 if [[ "$0" == "$SYSTEM_INSTALL_DIR/l4m" ]] || [[ -L "$0" && "$(readlink -f "$0")" == "$SYSTEM_INSTALL_DIR/l4m" ]]; then
     MANAGER_ROOT="$SYSTEM_INSTALL_DIR"
     INSTALL_TYPE="system"
@@ -21,36 +20,27 @@ elif [[ "$0" == "$USER_INSTALL_DIR/l4m" ]] || [[ -L "$0" && "$(readlink -f "$0")
     MANAGER_ROOT="$USER_INSTALL_DIR"
     INSTALL_TYPE="user"
 else
-    # 临时运行模式 (如管道安装)
-    # 检测是否为管道运行: $0 可能是 bash, /dev/fd/..., /proc/self/fd/...
     if [[ "$0" == *"bash"* ]] || [[ "$0" == *"/fd/"* ]]; then
-        # 管道模式：使用临时目录，避免直接在 /proc 下操作报错
         MANAGER_ROOT="/tmp/l4m_install_temp"
         mkdir -p "$MANAGER_ROOT" 2>/dev/null || MANAGER_ROOT="$HOME/.cache/l4m_temp"
         mkdir -p "$MANAGER_ROOT"
     else
-        # 脚本直接运行模式
         MANAGER_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     fi
     INSTALL_TYPE="temp"
 fi
 
 # 3. 确定最终使用的配置路径
-# 如果是临时模式，我们在安装时再决定最终路径；如果是已安装模式，直接使用
 if [[ "$INSTALL_TYPE" != "temp" ]]; then
     FINAL_ROOT="$MANAGER_ROOT"
 else
-    # 默认尝试系统安装，后续在 install 函数中会根据权限降级
-    if [ "$EUID" -eq 0 ]; then
-        FINAL_ROOT="$SYSTEM_INSTALL_DIR"
-    else
-        FINAL_ROOT="$USER_INSTALL_DIR"
-    fi
+    if [ "$EUID" -eq 0 ]; then FINAL_ROOT="$SYSTEM_INSTALL_DIR"; else FINAL_ROOT="$USER_INSTALL_DIR"; fi
 fi
 
 DATA_FILE="${FINAL_ROOT}/servers.dat"
 JS_MODS_DIR="${FINAL_ROOT}/js-mods"
 STEAMCMD_DIR="${FINAL_ROOT}/steamcmd_common"
+BACKUP_DIR="${FINAL_ROOT}/backups"
 DEFAULT_APPID="222860"
 
 # 颜色定义
@@ -67,222 +57,130 @@ NC='\033[0m'
 #=============================================================================
 install_smart() {
     echo -e "${CYAN}正在初始化安装向导...${NC}"
-    
-    # 权限检测与路径选择
     local target_dir=""
     local link_path=""
     
     if [ "$EUID" -eq 0 ]; then
-        echo -e "${GREEN}检测到 Root 权限，准备进行系统级安装...${NC}"
-        target_dir="$SYSTEM_INSTALL_DIR"
-        link_path="$SYSTEM_BIN"
+        target_dir="$SYSTEM_INSTALL_DIR"; link_path="$SYSTEM_BIN"
     else
-        echo -e "${YELLOW}检测到普通用户/容器环境，准备进行用户级安装...${NC}"
-        target_dir="$USER_INSTALL_DIR"
-        link_path="$USER_BIN"
+        target_dir="$USER_INSTALL_DIR"; link_path="$USER_BIN"
     fi
     
-    # 再次确认目标目录可写 (应对只读文件系统等特殊情况)
     if ! mkdir -p "$target_dir" 2>/dev/null; then
         if [ "$target_dir" == "$SYSTEM_INSTALL_DIR" ]; then
-             echo -e "${RED}系统目录无法写入，尝试回退到用户目录...${NC}"
-             target_dir="$USER_INSTALL_DIR"
-             link_path="$USER_BIN"
-             mkdir -p "$target_dir" || { echo -e "${RED}无法创建安装目录，安装失败。${NC}"; exit 1; }
+             echo -e "${RED}系统目录不可写，回退到用户目录...${NC}"
+             target_dir="$USER_INSTALL_DIR"; link_path="$USER_BIN"
+             mkdir -p "$target_dir" || { echo -e "${RED}安装失败。${NC}"; exit 1; }
         else
-             echo -e "${RED}无法创建安装目录 $target_dir，请检查权限。${NC}"; exit 1;
+             echo -e "${RED}无权限创建 $target_dir${NC}"; exit 1;
         fi
     fi
 
     echo -e "${CYAN}安装路径: $target_dir${NC}"
+    mkdir -p "$target_dir" "${target_dir}/steamcmd_common" "${target_dir}/js-mods" "${target_dir}/backups"
     
-    # 创建子目录
-    mkdir -p "$target_dir"
-    mkdir -p "${target_dir}/steamcmd_common"
-    mkdir -p "${target_dir}/js-mods"
-    
-    # 获取脚本文件
     if [ -f "$0" ] && [[ "$0" != *"bash"* ]] && [[ "$0" != *"/fd/"* ]]; then
         cp "$0" "$target_dir/l4m"
     else
-        echo -e "${YELLOW}正在下载最新版脚本...${NC}"
-        if ! curl -sL "$UPDATE_URL" -o "$target_dir/l4m"; then
-            echo -e "${RED}下载失败，请检查网络。${NC}"; exit 1;
-        fi
+        echo -e "${YELLOW}下载最新脚本...${NC}"
+        curl -sL "$UPDATE_URL" -o "$target_dir/l4m" || { echo -e "${RED}下载失败${NC}"; exit 1; }
     fi
     chmod +x "$target_dir/l4m"
     
-    # 创建软链接
-    local bin_dir=$(dirname "$link_path")
-    mkdir -p "$bin_dir"
-    
+    mkdir -p "$(dirname "$link_path")"
     if ln -sf "$target_dir/l4m" "$link_path" 2>/dev/null; then
-        echo -e "${GREEN}链接创建成功: $link_path${NC}"
+        echo -e "${GREEN}链接已创建: $link_path${NC}"
     else
-        echo -e "${YELLOW}警告: 无法创建软链接到 $link_path (可能无权限)${NC}"
-        echo -e "您可以手动添加 alias: ${GREY}alias l4m='$target_dir/l4m'${NC}"
+        echo -e "${YELLOW}无法创建链接，请手动添加 alias l4m='$target_dir/l4m'${NC}"
     fi
     
-    # 迁移旧数据
     if [ "$MANAGER_ROOT" != "$target_dir" ] && [ -f "${MANAGER_ROOT}/servers.dat" ]; then
-         echo -e "${YELLOW}迁移旧配置数据...${NC}"
          cp "${MANAGER_ROOT}/servers.dat" "$target_dir/"
     fi
-    if [ ! -f "$target_dir/servers.dat" ]; then touch "$target_dir/servers.dat"; fi
+    touch "$target_dir/servers.dat"
     
-    # 环境变量提示
-    if [[ "$link_path" == "$USER_BIN" ]]; then
-        if [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
-            echo -e "${YELLOW}提示: 请将 $HOME/bin 加入您的 PATH 环境变量，或者直接运行 ~/.l4d2_manager/l4m${NC}"
-            echo -e "命令: ${GREY}echo 'export PATH=\$PATH:\$HOME/bin' >> ~/.bashrc && source ~/.bashrc${NC}"
-        fi
+    if [[ "$link_path" == "$USER_BIN" ]] && [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
+        echo -e "${YELLOW}请将 $HOME/bin 加入 PATH 环境变量。${NC}"
     fi
 
-    echo -e "${GREEN}安装完成！${NC}"
-    echo -e "现在输入 ${CYAN}l4m${NC} 即可启动。"
+    echo -e "${GREEN}安装完成！输入 l4m 启动。${NC}"
     sleep 2
     exec "$target_dir/l4m"
 }
 
 self_update() {
-    echo -e "${CYAN}正在检查更新...${NC}"
-    local temp_file="/tmp/l4m_update.sh"
-    
-    if curl -sL "$UPDATE_URL" -o "$temp_file"; then
-        # 简单检查文件完整性
-        if grep -q "main()" "$temp_file"; then
-            mv "$temp_file" "$FINAL_ROOT/l4m"
-            chmod +x "$FINAL_ROOT/l4m"
-            echo -e "${GREEN}更新成功！重启脚本中...${NC}"
-            sleep 1
-            exec "$FINAL_ROOT/l4m"
+    echo -e "${CYAN}检查更新...${NC}"
+    local temp="/tmp/l4m_upd.sh"
+    if curl -sL "$UPDATE_URL" -o "$temp"; then
+        if grep -q "main()" "$temp"; then
+            mv "$temp" "$FINAL_ROOT/l4m"; chmod +x "$FINAL_ROOT/l4m"
+            echo -e "${GREEN}更新成功！${NC}"; sleep 1; exec "$FINAL_ROOT/l4m"
         else
-            echo -e "${RED}更新文件校验失败。${NC}"
-            rm -f "$temp_file"
+            echo -e "${RED}校验失败${NC}"; rm "$temp"
         fi
     else
-        echo -e "${RED}无法连接更新服务器。${NC}"
+        echo -e "${RED}连接失败${NC}"
     fi
-    read -n 1 -s -r -p "按任意键返回..."
+    read -n 1 -s -r
 }
 
 #=============================================================================
-# 1. 依赖管理
+# 1. 基础功能
 #=============================================================================
-check_and_install_deps() {
-    local missing_deps=()
-    local required_cmds=("tmux" "curl" "wget" "tar" "tree" "sed" "awk")
+check_deps() {
+    local miss=()
+    local req=("tmux" "curl" "wget" "tar" "tree" "sed" "awk" "lsof")
+    for c in "${req[@]}"; do command -v "$c" >/dev/null 2>&1 || miss+=("$c"); done
+    if [ ${#miss[@]} -eq 0 ]; then return 0; fi
     
-    for cmd in "${required_cmds[@]}"; do
-        if ! command -v "$cmd" >/dev/null 2>&1; then
-            missing_deps+=("$cmd")
-        fi
-    done
-    
-    if [ ${#missing_deps[@]} -eq 0 ]; then
-        return 0
-    fi
-    
-    echo -e "${YELLOW}正在后台自动安装缺失依赖: ${missing_deps[*]} ...${NC}"
-    
-    # 检测 Proot/Non-Root 环境，如果无 Root 权限则跳过系统包安装，提示用户
+    echo -e "${YELLOW}安装依赖: ${miss[*]} ...${NC}"
     if [ "$EUID" -ne 0 ]; then
-        echo -e "${YELLOW}非 Root 环境，尝试使用 pkg (Termux) 或跳过...${NC}"
-        if command -v pkg >/dev/null 2>&1; then
-             pkg install -y tmux curl wget tar tree sed gawk
-             return
-        else
-             echo -e "${RED}无 Root 权限且非 Termux，无法自动安装系统依赖。${NC}"
-             echo -e "请确保您已手动安装: ${missing_deps[*]}"
-             read -n 1 -s -r -p "按任意键尝试继续..."
-             return
-        fi
+        if command -v pkg >/dev/null; then pkg install -y "${miss[@]}"; return; fi
+        echo -e "${RED}非Root且无pkg，请手动安装: ${miss[*]}${NC}"; read -n 1 -s -r; return
     fi
     
     if [ -f /etc/debian_version ]; then
         dpkg --add-architecture i386 >/dev/null 2>&1
-        apt-get update -qq >/dev/null 2>&1
-        apt-get install -y -qq tmux curl wget tar tree lib32gcc-s1 lib32stdc++6 ca-certificates >/dev/null 2>&1
+        apt-get update -qq && apt-get install -y -qq "${miss[@]}" lib32gcc-s1 lib32stdc++6 ca-certificates
     elif [ -f /etc/redhat-release ]; then
-        yum install -y -q tmux curl wget tar tree glibc.i686 libstdc++.i686 >/dev/null 2>&1
-    else
-        echo -e "${RED}请手动安装: ${missing_deps[*]} 及 32位运行库${NC}"
-        read -n 1 -s -r -p "按任意键继续..."
+        yum install -y -q "${miss[@]}" glibc.i686 libstdc++.i686
     fi
 }
 
-#=============================================================================
-# 2. TUI 基础库
-#=============================================================================
-tui_header() {
-    clear
-    echo -e "${BLUE}==============================================================${NC}"
-    echo -e "${CYAN}             L4D2 Manager (L4M) - CLI/TUI v3.1            ${NC}"
-    echo -e "${BLUE}==============================================================${NC}"
-    echo ""
+check_port() {
+    local port="$1"
+    if command -v lsof >/dev/null; then lsof -i ":$port" >/dev/null 2>&1; return $?; fi
+    if command -v netstat >/dev/null; then netstat -tuln | grep -q ":$port "; return $?; fi
+    (echo > /dev/tcp/127.0.0.1/$port) >/dev/null 2>&1; return $?
 }
+
+#=============================================================================
+# 2. TUI 库
+#=============================================================================
+tui_header() { clear; echo -e "${BLUE}=== L4D2 Manager (L4M) v3.2 ===${NC}\n"; }
 
 tui_input() {
-    local prompt="$1"
-    local default="$2"
-    local var_name="$3"
-    local is_password="$4"
-    
-    if [ -n "$default" ]; then
-        echo -e "${YELLOW}${prompt} ${GREY}[默认: ${default}]${NC}"
-    else
-        echo -e "${YELLOW}${prompt}${NC}"
-    fi
-    
-    if [ "$is_password" == "true" ]; then
-        read -s -p "> " input_str
-        echo ""
-    else
-        read -p "> " input_str
-    fi
-    
-    if [ -z "$input_str" ] && [ -n "$default" ]; then
-        eval $var_name="$default"
-    else
-        eval $var_name=\"\$input_str\"
-    fi
+    local p="$1"; local d="$2"; local v="$3"; local pass="$4"
+    if [ -n "$d" ]; then echo -e "${YELLOW}$p ${GREY}[默认: $d]${NC}"; else echo -e "${YELLOW}$p${NC}"; fi
+    if [ "$pass" == "true" ]; then read -s -p "> " i; echo ""; else read -p "> " i; fi
+    if [ -z "$i" ] && [ -n "$d" ]; then eval $v="$d"; else eval $v=\"\$i\"; fi
 }
 
 tui_menu() {
-    local title="$1"
-    shift
-    local options=("$@")
-    local selected=0
-    local total=${#options[@]}
-    
-    tput civis
-    trap 'tput cnorm' EXIT
-    
+    local t="$1"; shift; local opts=("$@"); local sel=0; local tot=${#opts[@]}
+    tput civis; trap 'tput cnorm' EXIT
     while true; do
-        tui_header
-        echo -e "${YELLOW}${title}${NC}"
-        echo "----------------------------------------"
-        
-        for ((i=0; i<total; i++)); do
-            if [ $i -eq $selected ]; then
-                echo -e "${GREEN} -> ${options[i]} ${NC}"
-            else
-                echo -e "    ${options[i]} "
-            fi
+        tui_header; echo -e "${YELLOW}$t${NC}\n----------------------------------------"
+        for ((i=0; i<tot; i++)); do
+            if [ $i -eq $sel ]; then echo -e "${GREEN} -> ${opts[i]} ${NC}"; else echo -e "    ${opts[i]} "; fi
         done
         echo "----------------------------------------"
-        echo -e "${GREY}[↑/↓] 选择  [Enter] 确认${NC}"
-        
-        read -rsn1 key 2>/dev/null
-        case "$key" in
-            "") tput cnorm; return $selected ;;
-            "A") ((selected--)); if [ $selected -lt 0 ]; then selected=$((total-1)); fi ;;
-            "B") ((selected++)); if [ $selected -ge $total ]; then selected=0; fi ;;
-            $'\x1b')
-                read -rsn2 rest 2>/dev/null || rest=""
-                if [[ "$rest" == "[A" ]]; then ((selected--)); if [ $selected -lt 0 ]; then selected=$((total-1)); fi; fi
-                if [[ "$rest" == "[B" ]]; then ((selected++)); if [ $selected -ge $total ]; then selected=0; fi; fi
-                ;;
+        read -rsn1 k 2>/dev/null
+        case "$k" in
+            "") tput cnorm; return $sel ;;
+            "A") ((sel--)); if [ $sel -lt 0 ]; then sel=$((tot-1)); fi ;;
+            "B") ((sel++)); if [ $sel -ge $tot ]; then sel=0; fi ;;
+            $'\x1b') read -rsn2 r 2>/dev/null; if [[ "$r" == "[A" ]]; then ((sel--)); fi; if [[ "$r" == "[B" ]]; then ((sel++)); fi ;;
         esac
     done
 }
@@ -292,337 +190,295 @@ tui_menu() {
 #=============================================================================
 install_steamcmd() {
     if [ ! -f "${STEAMCMD_DIR}/steamcmd.sh" ]; then
-        echo -e "${YELLOW}正在初始化 SteamCMD...${NC}"
-        mkdir -p "${STEAMCMD_DIR}"
-        if ! curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar zxvf - -C "${STEAMCMD_DIR}"; then
-            echo -e "${RED}SteamCMD 下载失败！${NC}"
-            return 1
-        fi
+        echo -e "${YELLOW}初始化 SteamCMD...${NC}"; mkdir -p "${STEAMCMD_DIR}"
+        curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar zxvf - -C "${STEAMCMD_DIR}"
     fi
-    return 0
 }
 
-deploy_server_wizard() {
-    tui_header
-    echo -e "${GREEN}开始部署新的 L4D2 服务器实例${NC}"
-    
-    local srv_name=""
-    while [ -z "$srv_name" ]; do
-        tui_input "请输入服务器名称 (用于标识)" "l4d2_srv_1" "srv_name"
-        if grep -q "^${srv_name}|" "$DATA_FILE"; then
-            echo -e "${RED}名称已存在。${NC}"
-            srv_name=""
-        fi
+deploy_wizard() {
+    tui_header; echo -e "${GREEN}部署新实例${NC}"
+    local name=""; while [ -z "$name" ]; do
+        tui_input "服务器名称" "l4d2_srv_1" "name"
+        if grep -q "^${name}|" "$DATA_FILE"; then echo -e "${RED}名称已存在${NC}"; name=""; fi
     done
     
-    local install_path=""
-    while [ -z "$install_path" ]; do
-        tui_input "请输入安装目录" "${FINAL_ROOT}/${srv_name}" "install_path"
-        if [ -d "$install_path" ] && [ "$(ls -A "$install_path")" ]; then
-            echo -e "${RED}目录不为空。${NC}"
-            install_path=""
-        fi
+    local path=""; while [ -z "$path" ]; do
+        tui_input "安装目录" "${FINAL_ROOT}/${name}" "path"
+        if [ -d "$path" ] && [ "$(ls -A "$path")" ]; then echo -e "${RED}目录不为空${NC}"; path=""; fi
     done
     
-    tui_header
-    echo -e "${YELLOW}登录方式${NC}"
-    echo "1. 匿名 (Anonymous)"
-    echo "2. 账号登录"
-    local login_mode
-    tui_input "选择 (1/2)" "1" "login_mode"
+    tui_header; echo "1. 匿名登录"; echo "2. 账号登录"
+    local mode; tui_input "选择 (1/2)" "1" "mode"
     
-    mkdir -p "$install_path"
-    install_steamcmd
-    
-    echo -e "${CYAN}启动 SteamCMD...${NC}"
-    local steam_script="${install_path}/update_script.txt"
-    
-    if [ "$login_mode" == "2" ]; then
-        local steam_user steam_pass
-        tui_input "Steam 账号" "" "steam_user"
-        tui_input "Steam 密码" "" "steam_pass" "true"
-        echo "force_install_dir \"$install_path\"" > "$steam_script"
-        echo "login $steam_user $steam_pass" >> "$steam_script"
-        echo "app_update $DEFAULT_APPID validate" >> "$steam_script"
-        echo "quit" >> "$steam_script"
-        "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$steam_script"
+    mkdir -p "$path"; install_steamcmd
+    echo -e "${CYAN}开始下载...${NC}"
+    local script="${path}/update.txt"
+    if [ "$mode" == "2" ]; then
+        local u p; tui_input "账号" "" "u"; tui_input "密码" "" "p" "true"
+        echo "force_install_dir \"$path\"" > "$script"; echo "login $u $p" >> "$script"
+        echo "app_update $DEFAULT_APPID validate" >> "$script"; echo "quit" >> "$script"
+        "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$script"
     else
-        "${STEAMCMD_DIR}/steamcmd.sh" +force_install_dir "$install_path" +login anonymous +app_update $DEFAULT_APPID validate +quit
+        "${STEAMCMD_DIR}/steamcmd.sh" +force_install_dir "$path" +login anonymous +app_update $DEFAULT_APPID validate +quit
     fi
     
-    if [ ! -f "${install_path}/srcds_run" ]; then
-        echo -e "${RED}部署失败。${NC}"
-        read -n 1 -s -r -p "按任意键返回..."
-        return 1
+    if [ ! -f "${path}/srcds_run" ]; then echo -e "${RED}失败${NC}"; read -n 1 -s -r; return; fi
+    
+    mkdir -p "${path}/left4dead2/cfg"
+    if [ ! -f "${path}/left4dead2/cfg/server.cfg" ]; then
+        echo -e "hostname \"$name\"\nrcon_password \"password\"\nsv_lan 0\nsv_cheats 0\nsv_region 4" > "${path}/left4dead2/cfg/server.cfg"
     fi
     
-    generate_configs "$srv_name" "$install_path"
-    echo "${srv_name}|${install_path}|STOPPED|27015" >> "$DATA_FILE"
-    echo -e "${GREEN}部署成功！${NC}"
-    read -n 1 -s -r -p "按任意键继续..."
-}
-
-generate_configs() {
-    local name="$1"
-    local path="$2"
-    local cfg_path="${path}/left4dead2/cfg/server.cfg"
-    mkdir -p "$(dirname "$cfg_path")"
-    if [ ! -f "$cfg_path" ]; then
-        cat > "$cfg_path" <<EOF
-hostname "${name}"
-rcon_password "password"
-sv_lan 0
-sv_cheats 0
-sv_region 4
-EOF
-    fi
+    echo -e "#!/bin/bash\nwhile true; do\n echo 'Starting...'\n ./srcds_run -game left4dead2 -port 27015 +map c2m1_highway +maxplayers 8 -tickrate 60\n echo 'Restarting in 5s...'\n sleep 5\ndone" > "${path}/run_guard.sh"
+    chmod +x "${path}/run_guard.sh"
     
-    local run_script="${path}/run_guard.sh"
-    cat > "$run_script" <<EOF
-#!/bin/bash
-while true; do
-    echo "Starting Server..."
-    ./srcds_run -game left4dead2 -port 27015 +map c2m1_highway +maxplayers 8 -tickrate 60
-    echo "Server crashed. Restarting in 5s..."
-    sleep 5
-done
-EOF
-    chmod +x "$run_script"
+    # 格式: Name|Path|Status|Port|AutoStart
+    echo "${name}|${path}|STOPPED|27015|false" >> "$DATA_FILE"
+    echo -e "${GREEN}成功!${NC}"; read -n 1 -s -r
 }
 
 #=============================================================================
-# 4. 服务器管理
+# 4. 服务器管理与自启
 #=============================================================================
-get_server_status() {
-    local name="$1"
-    if tmux has-session -t "l4d2_${name}" 2>/dev/null; then echo "RUNNING"; else echo "STOPPED"; fi
-}
+get_status() { if tmux has-session -t "l4d2_$1" 2>/dev/null; then echo "RUNNING"; else echo "STOPPED"; fi; }
 
-manage_servers_menu() {
-    local servers=()
-    local display_options=()
-    while IFS='|' read -r name path status port; do
-        if [ -n "$name" ]; then
-            local st=$(get_server_status "$name")
-            local col=""
-            if [ "$st" == "RUNNING" ]; then col="${GREEN}[运行]${NC}"; else col="${RED}[停止]${NC}"; fi
-            servers+=("$name")
-            display_options+=("${name} ${col}")
+manage_menu() {
+    local srvs=(); local opts=()
+    while IFS='|' read -r n p s port auto; do
+        if [ -n "$n" ]; then
+            local st=$(get_status "$n"); local c=""; if [ "$st" == "RUNNING" ]; then c="${GREEN}[运行]${NC}"; else c="${RED}[停止]${NC}"; fi
+            local ac=""; if [ "$auto" == "true" ]; then ac="${CYAN}[自启]${NC}"; fi
+            srvs+=("$n"); opts+=("$n $c $ac")
         fi
     done < "$DATA_FILE"
     
-    if [ ${#servers[@]} -eq 0 ]; then
-        echo -e "${YELLOW}无服务器。${NC}"; read -n 1 -s -r -p "按任意键返回..."; return
-    fi
-    display_options+=("返回")
-    
-    tui_menu "选择服务器:" "${display_options[@]}"
-    local choice=$?
-    if [ $choice -lt ${#servers[@]} ]; then
-        server_control_panel "${servers[$choice]}"
-    fi
+    if [ ${#srvs[@]} -eq 0 ]; then echo -e "${YELLOW}无实例${NC}"; read -n 1 -s -r; return; fi
+    opts+=("返回")
+    tui_menu "选择实例:" "${opts[@]}"; local c=$?
+    if [ $c -lt ${#srvs[@]} ]; then control_panel "${srvs[$c]}"; fi
 }
 
-server_control_panel() {
-    local srv_name="$1"
-    local srv_path=$(grep "^${srv_name}|" "$DATA_FILE" | cut -d'|' -f2)
+control_panel() {
+    local n="$1"
+    # 获取最新信息
+    local line=$(grep "^${n}|" "$DATA_FILE")
+    local p=$(echo "$line" | cut -d'|' -f2)
+    local port=$(echo "$line" | cut -d'|' -f4)
+    local auto=$(echo "$line" | cut -d'|' -f5)
+    
     while true; do
-        local st=$(get_server_status "$srv_name")
-        tui_menu "管理: ${srv_name} [$st]" "启动" "停止" "重启" "控制台" "日志" "参数" "插件" "返回"
+        local st=$(get_status "$n")
+        local a_txt="开启自启"; if [ "$auto" == "true" ]; then a_txt="关闭自启"; fi
+        
+        tui_menu "管理: $n [$st]" "启动" "停止" "重启" "控制台" "日志" "配置启动参数" "插件管理" "$a_txt" "备份服务端" "返回"
         case $? in
-            0) start_server "$srv_name" "$srv_path" ;;
-            1) stop_server "$srv_name" ;;
-            2) stop_server "$srv_name"; sleep 1; start_server "$srv_name" "$srv_path" ;;
-            3) attach_console "$srv_name" ;;
-            4) view_logs "$srv_path" ;;
-            5) edit_startup_args "$srv_path" ;;
-            6) plugin_manager_adapter "$srv_path" ;;
-            7) return ;;
+            0) start_srv "$n" "$p" "$port" ;;
+            1) stop_srv "$n" ;;
+            2) stop_srv "$n"; sleep 1; start_srv "$n" "$p" "$port" ;;
+            3) attach_con "$n" ;;
+            4) view_log "$p" ;;
+            5) edit_args "$p" ;;
+            6) plugins_menu "$p" ;;
+            7) toggle_auto "$n" "$line"; break ;; # break to refresh
+            8) backup_srv "$n" "$p" ;;
+            9) return ;;
         esac
     done
+    control_panel "$n" # reload
 }
 
-start_server() {
-    local name="$1"
-    local path="$2"
-    if [ "$(get_server_status "$name")" == "RUNNING" ]; then return; fi
-    cd "$path" || return
-    tmux new-session -d -s "l4d2_${name}" "./run_guard.sh"
-    echo -e "${GREEN}已启动。${NC}"; sleep 1
+start_srv() {
+    local n="$1"; local p="$2"; local port="$3"
+    if [ "$(get_status "$n")" == "RUNNING" ]; then return; fi
+    
+    # 端口检查 (简单解析启动脚本中的端口，或者使用记录的端口)
+    # 这里我们尝试从 run_guard.sh 中 grep 出端口，如果 grep 不到则用默认
+    local real_port=$(grep -oP "(?<=-port )\d+" "$p/run_guard.sh" | head -1)
+    if [ -z "$real_port" ]; then real_port=$port; fi
+    
+    if check_port "$real_port"; then
+        echo -e "${RED}端口 $real_port 被占用!${NC}"; read -n 1 -s -r; return
+    fi
+    
+    cd "$p" || return
+    tmux new-session -d -s "l4d2_$n" "./run_guard.sh"
+    echo -e "${GREEN}启动指令已发送${NC}"; sleep 1
 }
 
-stop_server() {
-    local name="$1"
-    tmux send-keys -t "l4d2_${name}" C-c
-    sleep 1
-    if tmux has-session -t "l4d2_${name}" 2>/dev/null; then tmux kill-session -t "l4d2_${name}"; fi
-    echo -e "${GREEN}已停止。${NC}"; sleep 1
+stop_srv() {
+    local n="$1"
+    tmux send-keys -t "l4d2_$n" C-c; sleep 1
+    if tmux has-session -t "l4d2_$n" 2>/dev/null; then tmux kill-session -t "l4d2_$n"; fi
+    echo -e "${GREEN}已停止${NC}"; sleep 1
 }
 
-attach_console() {
-    local name="$1"
-    if [ "$(get_server_status "$name")" == "STOPPED" ]; then echo -e "${RED}未运行。${NC}"; sleep 1; return; fi
-    echo -e "${YELLOW}按 Ctrl+B, D 退出控制台。${NC}"; read -n 1 -s -r
-    tmux attach-session -t "l4d2_${name}"
+attach_con() {
+    local n="$1"
+    if [ "$(get_status "$n")" == "STOPPED" ]; then echo -e "${RED}未运行${NC}"; sleep 1; return; fi
+    echo -e "${YELLOW}按 Ctrl+B, D 离线${NC}"; read -n 1 -s -r
+    tmux attach-session -t "l4d2_$n"
 }
 
-view_logs() {
-    local path="$1"
-    local log="${path}/left4dead2/console.log"
-    if [ -f "$log" ]; then tail -f "$log"; else echo -e "${RED}无日志(需 -condebug)${NC}"; read -n 1 -s -r; fi
+view_log() {
+    local f="$1/left4dead2/console.log"
+    if [ -f "$f" ]; then tail -f "$f"; else echo -e "${RED}无日志(请确认已加-condebug)${NC}"; read -n 1 -s -r; fi
 }
 
-edit_startup_args() {
-    local path="$1"
-    local script="${path}/run_guard.sh"
-    local curr=$(grep "./srcds_run" "$script")
-    tui_header
-    echo -e "${CYAN}当前:${NC} $curr"
-    echo -e "${YELLOW}新命令:${NC}"
-    read -e -i "$curr" new_line
-    if [ -n "$new_line" ]; then
-        local escaped=$(printf '%s\n' "$new_line" | sed 's:[][\/.^$*]:\\&:g')
-        sed -i "s|^\./srcds_run.*|$new_line|" "$script"
-        echo -e "${GREEN}已保存。${NC}"
+edit_args() {
+    local s="$1/run_guard.sh"; local c=$(grep "./srcds_run" "$s")
+    tui_header; echo -e "${CYAN}当前:${NC} $c\n${YELLOW}新指令:${NC}"
+    read -e -i "$c" new
+    if [ -n "$new" ]; then
+        local esc=$(printf '%s\n' "$new" | sed 's:[][\/.^$*]:\\&:g')
+        sed -i "s|^\./srcds_run.*|$new|" "$s"; echo -e "${GREEN}保存${NC}"
     fi
     sleep 1
 }
 
+toggle_auto() {
+    local n="$1"; local l="$2"
+    local cur=$(echo "$l" | cut -d'|' -f5)
+    local new="true"; if [ "$cur" == "true" ]; then new="false"; fi
+    
+    # Update line (careful with delimiter)
+    # Reconstruct line: Name|Path|Status|Port|New
+    local pre=$(echo "$l" | cut -d'|' -f1-4)
+    # Use temporary file to avoid sed issues with special chars
+    grep -v "^$n|" "$DATA_FILE" > "${DATA_FILE}.tmp"
+    echo "${pre}|${new}" >> "${DATA_FILE}.tmp"
+    mv "${DATA_FILE}.tmp" "$DATA_FILE"
+    
+    setup_global_resume
+    echo -e "${GREEN}自启已设置为: $new${NC}"; sleep 1
+}
+
+setup_global_resume() {
+    if [ "$EUID" -eq 0 ]; then
+        local s="/etc/systemd/system/l4m-resume.service"
+        if [ ! -f "$s" ]; then
+            echo "[Unit]\nDescription=L4M Resume\nAfter=network.target\n[Service]\nType=oneshot\nExecStart=$FINAL_ROOT/l4m resume\nRemainAfterExit=yes\n[Install]\nWantedBy=multi-user.target" > "$s"
+            systemctl daemon-reload; systemctl enable l4m-resume.service >/dev/null 2>&1
+        fi
+    else
+        if ! crontab -l 2>/dev/null | grep -q "l4m resume"; then
+            (crontab -l 2>/dev/null; echo "@reboot $FINAL_ROOT/l4m resume >> $FINAL_ROOT/resume.log 2>&1") | crontab -
+        fi
+    fi
+}
+
+resume_all() {
+    echo "L4M Resume triggered..."
+    while IFS='|' read -r n p s port auto; do
+        if [ "$auto" == "true" ]; then
+            echo "Starting $n..."
+            cd "$p" || continue
+            tmux new-session -d -s "l4d2_$n" "./run_guard.sh"
+        fi
+    done < "$DATA_FILE"
+}
+
+backup_srv() {
+    local n="$1"; local p="$2"
+    mkdir -p "$BACKUP_DIR"
+    local f="bk_${n}_$(date +%Y%m%d_%H%M).tar.gz"
+    echo -e "${CYAN}正在打包...${NC}"
+    tar -czf "${BACKUP_DIR}/$f" --exclude="left4dead2/console.log" --exclude="left4dead2/downloads" -C "$(dirname "$p")" "$(basename "$p")"
+    echo -e "${GREEN}已保存至 backups/$f${NC}"; read -n 1 -s -r
+}
+
 #=============================================================================
-# 5. 插件管理
+# 5. 插件
 #=============================================================================
-plugin_manager_adapter() {
-    local srv_path="$1"
-    if [ ! -d "${srv_path}/left4dead2" ]; then echo -e "${RED}目录异常${NC}"; read -n 1 -s -r; return; fi
+plugins_menu() {
+    local p="$1"
+    if [ ! -d "$p/left4dead2" ]; then echo -e "${RED}目录错${NC}"; read -n 1 -s -r; return; fi
     while true; do
         tui_menu "插件管理" "安装插件" "安装平台(SM/MM)" "返回"
         case $? in
-            0) install_plugins_tui "$srv_path" ;;
-            1) install_platform_tui "$srv_path" ;;
-            2) return ;;
+            0) inst_plug "$p" ;; 1) inst_plat "$p" ;; 2) return ;;
         esac
     done
 }
 
-install_plugins_tui() {
-    local target_root="$1/left4dead2"
-    # 自动搜索 JS-MODS
+inst_plug() {
+    local t="$1/left4dead2"
     if [ ! -d "$JS_MODS_DIR" ]; then
-        local found=$(find "$FINAL_ROOT" -maxdepth 4 -type d -name "JS-MODS" -print -quit)
-        if [ -n "$found" ]; then JS_MODS_DIR="$found"; fi
+        local f=$(find "$FINAL_ROOT" -maxdepth 4 -type d -name "JS-MODS" -print -quit)
+        if [ -n "$f" ]; then JS_MODS_DIR="$f"; fi
     fi
+    if [ ! -d "$JS_MODS_DIR" ]; then echo -e "${RED}缺 JS-MODS${NC}"; read -n 1 -s -r; return; fi
     
-    if [ ! -d "$JS_MODS_DIR" ]; then echo -e "${RED}未找到 JS-MODS。${NC}"; read -n 1 -s -r; return; fi
-    
-    local plugins=()
-    local display=()
+    local ps=(); local d=()
     while IFS= read -r -d '' dir; do
-        local name=$(basename "$dir")
-        plugins+=("$name")
-        if [ -d "${target_root}/addons/${name}" ]; then display+=("${name} ${GREEN}[已装]${NC}"); else display+=("${name}"); fi
+        local n=$(basename "$dir"); ps+=("$n")
+        if [ -d "$t/addons/$n" ]; then d+=("$n ${GREEN}[已装]${NC}"); else d+=("$n"); fi
     done < <(find "$JS_MODS_DIR" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
     
-    if [ ${#plugins[@]} -eq 0 ]; then echo -e "${YELLOW}空目录。${NC}"; read -n 1 -s -r; return; fi
+    if [ ${#ps[@]} -eq 0 ]; then echo "空"; read -n 1 -s -r; return; fi
     
-    local sel=()
-    local cur=0
-    local start=0
-    local size=15
-    local total=${#plugins[@]}
-    for ((j=0;j<total;j++)); do sel[j]=0; done
+    local sel=(); for ((j=0;j<${#ps[@]};j++)); do sel[j]=0; done
+    local cur=0; local start=0; local size=15; local tot=${#ps[@]}
     
     tput civis; trap 'tput cnorm' EXIT
     while true; do
-        tui_header
-        echo -e "${YELLOW}Space选择 Enter确认${NC}"
-        echo "----------------------------------------"
-        local end=$((start+size)); if [ $end -gt $total ]; then end=$total; fi
+        tui_header; echo -e "${YELLOW}Space选 Enter确${NC}\n----------------------------------------"
+        local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
         for ((j=start;j<end;j++)); do
-            local mark="[ ]"; if [ "${sel[j]}" -eq 1 ]; then mark="[x]"; fi
-            if [ $j -eq $cur ]; then echo -e "${GREEN}-> ${mark} ${display[j]}${NC}"; else echo -e "   ${mark} ${display[j]}"; fi
+            local m="[ ]"; if [ "${sel[j]}" -eq 1 ]; then m="[x]"; fi
+            if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${d[j]}${NC}"; else echo -e "   $m ${d[j]}"; fi
         done
-        echo "----------------------------------------"
-        read -rsn1 key 2>/dev/null
-        case "$key" in
+        read -rsn1 k 2>/dev/null
+        case "$k" in
             "") break ;;
             " ") if [ "${sel[cur]}" -eq 0 ]; then sel[cur]=1; else sel[cur]=0; fi ;;
-            "A") ((cur--)); if [ $cur -lt 0 ]; then cur=$((total-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi ;;
-            "B") ((cur++)); if [ $cur -ge $total ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi ;;
-            $'\x1b') read -rsn2 rest 2>/dev/null; if [[ "$rest" == "[A" ]]; then ((cur--)); fi; if [[ "$rest" == "[B" ]]; then ((cur++)); fi ;;
+            "A") ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi ;;
+            "B") ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi ;;
+            $'\x1b') read -rsn2 r; if [[ "$r" == "[A" ]]; then ((cur--)); fi; if [[ "$r" == "[B" ]]; then ((cur++)); fi ;;
         esac
     done
     tput cnorm
     
-    local count=0
-    for ((j=0;j<total;j++)); do
-        if [ "${sel[j]}" -eq 1 ]; then
-            cp -rf "${JS_MODS_DIR}/${plugins[j]}/"* "${target_root}/" 2>/dev/null
-            ((count++))
-        fi
+    local c=0
+    for ((j=0;j<tot;j++)); do
+        if [ "${sel[j]}" -eq 1 ]; then cp -rf "${JS_MODS_DIR}/${ps[j]}/"* "$t/" 2>/dev/null; ((c++)); fi
     done
-    echo -e "${GREEN}安装了 $count 个插件。${NC}"; read -n 1 -s -r
+    echo -e "${GREEN}完成 $c${NC}"; read -n 1 -s -r
 }
 
-install_platform_tui() {
-    local srv_path="$1"
-    local l4d2_dir="${srv_path}/left4dead2"
-    mkdir -p "$l4d2_dir"; cd "$l4d2_dir" || return
-    echo -e "${CYAN}下载 SM/MM...${NC}"
-    
-    local mms=$(curl -s "https://www.sourcemm.net/downloads.php?branch=stable" | grep -Eo "https://[^']+linux.tar.gz" | head -n 1)
-    local sm=$(curl -s "http://www.sourcemod.net/downloads.php?branch=stable" | grep -Eo "https://[^']+linux.tar.gz" | head -n 1)
-    
-    if [ -z "$mms" ] || [ -z "$sm" ]; then echo -e "${RED}链接获取失败。${NC}"; read -n 1 -s -r; return; fi
-    wget -qO mm.tar.gz "$mms" && tar -zxf mm.tar.gz && rm mm.tar.gz
-    wget -qO sm.tar.gz "$sm" && tar -zxf sm.tar.gz && rm sm.tar.gz
-    
-    local vdf="${l4d2_dir}/addons/metamod.vdf"
-    if [ -f "$vdf" ]; then sed -i '/"file"/c\\t"file"\t"..\/left4dead2\/addons\/metamod\/bin\/server"' "$vdf"; fi
-    echo -e "${GREEN}完成。${NC}"; read -n 1 -s -r
+inst_plat() {
+    local d="$1/left4dead2"; mkdir -p "$d"; cd "$d" || return
+    echo -e "${CYAN}下载...${NC}"
+    local m=$(curl -s "https://www.sourcemm.net/downloads.php?branch=stable" | grep -Eo "https://[^']+linux.tar.gz" | head -1)
+    local s=$(curl -s "http://www.sourcemod.net/downloads.php?branch=stable" | grep -Eo "https://[^']+linux.tar.gz" | head -1)
+    wget -qO mm.tar.gz "$m" && tar -zxf mm.tar.gz && rm mm.tar.gz
+    wget -qO sm.tar.gz "$s" && tar -zxf sm.tar.gz && rm sm.tar.gz
+    if [ -f "$d/addons/metamod.vdf" ]; then sed -i '/"file"/c\\t"file"\t"..\/left4dead2\/addons\/metamod\/bin\/server"' "$d/addons/metamod.vdf"; fi
+    echo "OK"; read -n 1 -s -r
 }
 
 #=============================================================================
-# 6. 主逻辑
+# 6. Main
 #=============================================================================
 main() {
     chmod +x "$0"
-    
-    # 参数处理
     case "$1" in
         "install") install_smart; exit 0 ;;
         "update") self_update; exit 0 ;;
+        "resume") resume_all; exit 0 ;;
     esac
     
-    # 首次运行引导安装 (只在非临时模式下检查)
     if [[ "$INSTALL_TYPE" == "temp" ]]; then
-        tui_header
-        echo -e "${YELLOW}欢迎使用 L4D2 Manager (管道模式)${NC}"
-        echo -e "我们建议您将其安装到系统，以便持久化数据和便捷访问。"
-        echo ""
-        read -p "是否安装? (y/n) [默认: y]: " choice
-        choice=${choice:-y}
-        if [[ "$choice" == "y" || "$choice" == "Y" ]]; then
-            install_smart
-            exit 0
-        fi
-        # 如果不安装，则继续使用临时目录运行
-    elif [[ "$INSTALL_TYPE" != "system" ]] && [[ "$INSTALL_TYPE" != "user" ]]; then
-        # 兜底逻辑
-        install_smart
-        exit 0
+        tui_header; echo -e "${YELLOW}建议安装到系统${NC}\n"; read -p "安装? (y/n): " c
+        if [[ "$c" == "y" || "$c" == "Y" ]]; then install_smart; exit 0; fi
     fi
     
-    check_and_install_deps
+    check_deps
     if [ ! -f "$DATA_FILE" ]; then touch "$DATA_FILE"; fi
     
     while true; do
-        tui_menu "主菜单" "部署新服务器" "服务器管理" "依赖管理" "系统更新" "退出"
+        tui_menu "L4M 主菜单" "部署新实例" "实例管理" "系统更新" "退出"
         case $? in
-            0) deploy_server_wizard ;;
-            1) manage_servers_menu ;;
-            2) check_and_install_deps ;;
-            3) self_update ;;
-            4) exit 0 ;;
+            0) deploy_wizard ;; 1) manage_menu ;; 2) self_update ;; 3) exit 0 ;;
         esac
     done
 }

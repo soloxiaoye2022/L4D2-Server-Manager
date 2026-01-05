@@ -1,7 +1,7 @@
 # L4D2 Server Manager (L4M)
 
 一个强大、现代化的求生之路2 (Left 4 Dead 2) 服务器管理工具。
-专为 Linux 环境设计，支持全平台（VPS、物理机、Termux/Proot 容器），提供流畅的 TUI 图形界面和 CLI 命令行操作。
+专为 Linux 环境设计，支持全平台（VPS、物理机、容器），提供流畅的 TUI 图形界面和 CLI 命令行操作。
 
 ## ✨ 核心特性
 

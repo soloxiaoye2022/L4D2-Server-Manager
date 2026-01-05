@@ -1,7 +1,7 @@
 # L4D2 Server Manager (L4M)
 
 A powerful, modern Left 4 Dead 2 server management tool.
-Designed for Linux environments, supporting all platforms (VPS, Dedicated Servers, Termux/Proot Containers) with a smooth TUI (Text User Interface) and CLI operations.
+Designed for Linux environments, supporting all platforms (VPS, Dedicated Servers, Containers) with a smooth TUI (Text User Interface) and CLI operations.
 
 ## ✨ Key Features
 
