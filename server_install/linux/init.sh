@@ -16,7 +16,12 @@ STEAMCMD_URL_BACKUP2="https://media.steampowered.com/client/installer/steamcmd_l
 STEAMCMD_BASE_URI="https://github.com/apples1949/SteamCmdLinuxFile/releases/download/steamcmd-latest/steamcmd_linux.tar.gz"
 QUICK_UPDATE_BASE_PACKAGE="https://github.com/apples1949/SteamCmdLinuxFile/releases/download/steamcmd-latest/package.tar.gz"
 
+# 保存原始URL，避免重复修改
+STEAMCMD_BASE_URI_ORIGINAL="${STEAMCMD_BASE_URI}"
+QUICK_UPDATE_BASE_PACKAGE_ORIGINAL="${QUICK_UPDATE_BASE_PACKAGE}"
+
 NETWORK_TEST_DONE=false
+PROXY_URL_BUILT=false
 
 function format_speed() {
     local speed_bps=$1
@@ -46,7 +51,7 @@ function test_steam_download_speed() {
         echo -e "\e[34m测试 ${name}: \e[36m${url}\e[0m"
         
         local curl_output
-        curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time ${timeout} -o /dev/null -s -w "%{http_code}:%{speed_download}" "${url}" 2>/dev/null)
+        curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time ${timeout} -o /dev/null -s -w "%{http_code}:%{speed_download}" "${url}" 2>/dev/null) || curl_output="000:0"
         local status=$(echo "${curl_output}" | cut -d: -f1)
         local download_speed=$(echo "${curl_output}" | cut -d: -f2 | cut -d. -f1)
         
@@ -85,7 +90,7 @@ function network_test() {
     # 测试直连
     echo -e "\e[34m正在测试直连...\e[0m"
     local curl_output
-    curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time $((timeout * 3)) -o /dev/null -s -w "%{http_code}:%{speed_download}" "${check_url}")
+    curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time $((timeout * 3)) -o /dev/null -s -w "%{http_code}:%{speed_download}" "${check_url}") || curl_output="000:0"
     local status=$(echo "${curl_output}" | cut -d: -f1)
     local download_speed=$(echo "${curl_output}" | cut -d: -f2 | cut -d. -f1)
     local curl_exit_code=0
@@ -108,21 +113,30 @@ function network_test() {
         
         echo -e "\e[34m测试代理: \e[36m${proxy}\e[0m"
         
-        # 直接进行完整测速（5秒超时）
-        curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time ${timeout} -o /dev/null -s -w "%{http_code}:%{speed_download}" "${test_url}" 2>/dev/null)
+        # 下载到临时文件进行验证
+        local temp_test_file="/tmp/proxy_test_$$.tmp"
+        curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time ${timeout} -o "${temp_test_file}" -s -w "%{http_code}:%{speed_download}" "${test_url}" 2>/dev/null) || curl_output="000:0"
         status=$(echo "${curl_output}" | cut -d: -f1)
         download_speed=$(echo "${curl_output}" | cut -d: -f2 | cut -d. -f1)
         
         if [ "${status}" = "200" ] && [ -n "${download_speed}" ] && [ "${download_speed}" -gt 0 ]; then
-            local formatted_speed=$(format_speed "${download_speed}")
-            echo -e "\e[34m  速度: \e[92m${formatted_speed}\e[0m"
-            if (( download_speed > best_speed )); then
-                best_speed=${download_speed}
-                best_proxy=${proxy}
+            # 检查文件内容，确保不是HTML页面
+            if [ -f "${temp_test_file}" ] && ! head -c 100 "${temp_test_file}" | grep -qi "html\|DOCTYPE\|<!DOCTYPE"; then
+                local formatted_speed=$(format_speed "${download_speed}")
+                echo -e "\e[34m  速度: \e[92m${formatted_speed}\e[0m"
+                if (( download_speed > best_speed )); then
+                    best_speed=${download_speed}
+                    best_proxy=${proxy}
+                fi
+            else
+                echo -e "\e[33m  代理返回HTML页面，不可用\e[0m"
             fi
         else
             echo -e "\e[33m  代理不可用 (状态: ${status})\e[0m"
         fi
+        
+        # 清理临时文件
+        rm -f "${temp_test_file}"
     done
 
     if [ -n "${best_proxy}" ]; then
@@ -150,12 +164,32 @@ function ensure_network_test() {
     fi
     network_test
     
-    # 只为GitHub相关URL添加代理，Steam CDN使用直连
-    if [ -n "${SELECTED_PROXY}" ]; then
-        STEAMCMD_BASE_URI="${SELECTED_PROXY}/${STEAMCMD_BASE_URI}"
-        QUICK_UPDATE_BASE_PACKAGE="${SELECTED_PROXY}/${QUICK_UPDATE_BASE_PACKAGE}"
+    # 只为GitHub相关URL添加代理，Steam CDN使用直连，且只构建一次
+    if [ -n "${SELECTED_PROXY}" ] && [ "$PROXY_URL_BUILT" = false ]; then
+        # 判断代理服务的类型，避免双重代理
+        case "${SELECTED_PROXY}" in
+            *"github.com"*|*"raw.githubusercontent.com"*)
+                # 这是直连或特定GitHub代理，使用完整URL
+                STEAMCMD_BASE_URI="${SELECTED_PROXY}/${STEAMCMD_BASE_URI_ORIGINAL}"
+                QUICK_UPDATE_BASE_PACKAGE="${SELECTED_PROXY}/${QUICK_UPDATE_BASE_PACKAGE_ORIGINAL}"
+                ;;
+            *"gh-proxy.com"*|*"ghm.078465.xyz"*|*"ghfast.top"*|*"github.tbedu.top"*)
+                # 这些是GitHub代理加速服务，需要GitHub路径部分
+                # 提取GitHub路径（去掉https://github.com部分）
+                local github_path_steam=$(echo "${STEAMCMD_BASE_URI_ORIGINAL}" | sed 's|https://github.com/||')
+                local github_path_package=$(echo "${QUICK_UPDATE_BASE_PACKAGE_ORIGINAL}" | sed 's|https://github.com/||')
+                STEAMCMD_BASE_URI="${SELECTED_PROXY}/${github_path_steam}"
+                QUICK_UPDATE_BASE_PACKAGE="${SELECTED_PROXY}/${github_path_package}"
+                ;;
+            *)
+                # 默认处理方式 - 使用完整URL
+                STEAMCMD_BASE_URI="${SELECTED_PROXY}/${STEAMCMD_BASE_URI_ORIGINAL}"
+                QUICK_UPDATE_BASE_PACKAGE="${SELECTED_PROXY}/${QUICK_UPDATE_BASE_PACKAGE_ORIGINAL}"
+                ;;
+        esac
         # Steam CDN使用直连，不通过代理，并测试选择最优源
         echo -e "\e[34mSteam CDN将使用直连，GitHub资源使用代理: \e[92m${SELECTED_PROXY}\e[0m"
+        PROXY_URL_BUILT=true
     fi
     
     # 测试并选择最优Steam下载源
@@ -206,17 +240,26 @@ function wait_with_param() {
     
     if [ -z "$wait_param" ] || ([ "$wait_param" != "true" ] && [ "$wait_param" != "false" ]); then
         echo -e "\e[33m3秒内按任意键跳过，否则将自动执行...\e[0m"
-        if read -t $timeout -n 1 -s; then
+        # 使用更稳定的方式处理超时输入
+        local user_input=""
+        if read -t $timeout -n 1 -s user_input; then
             echo -e "\n\e[32m${skip_message}\e[0m"
             return 1
         else
             echo -e "\n\e[32m${execute_message}\e[0m"
-            eval "$action_func"
+            # 确保函数执行错误不会导致脚本退出
+            if ! eval "$action_func"; then
+                echo -e "\e[31m执行函数失败: ${action_func}\e[0m"
+                return 1
+            fi
             return 0
         fi
     elif [ "$wait_param" = "true" ]; then
         echo -e "\n\e[32m${execute_message}\e[0m"
-        eval "$action_func"
+        if ! eval "$action_func"; then
+            echo -e "\e[31m执行函数失败: ${action_func}\e[0m"
+            return 1
+        fi
         return 0
     elif [ "$wait_param" = "false" ]; then
         echo -e "\n\e[32m${skip_message}\e[0m"
@@ -347,6 +390,8 @@ function debian() {
 }
 
 function install_dependencies() {
+    echo -e "\e[34m开始安装依赖，当前用户ID: $(id -u)\e[0m"
+    
     if [ "$(id -u)" -ne 0 ]; then
         echo -e "\e[33m当前用户无root权限，自动跳过执行换源脚本\e[0m"
     else
@@ -360,22 +405,31 @@ function install_dependencies() {
             "execute_dependency_script" || true
     fi
 
+    echo -e "\e[34m检测系统信息...\e[0m"
     source "/etc/os-release"
+    echo -e "\e[34m系统ID: ${ID}, 版本: ${VERSION_ID:-未知}\e[0m"
+    
     case "${ID}" in
         ubuntu)
+            echo -e "\e[34m执行Ubuntu依赖安装\e[0m"
             ubuntu
             ;;
         debian)
+            echo -e "\e[34m执行Debian依赖安装\e[0m"
             debian
             ;;
         centos)
+            echo -e "\e[34m执行CentOS依赖安装\e[0m"
             centos
             ;;
         *)
-            echo -e "${ID}\e[34m不支持的操作系统\e[0m \e[31m${ID}\e[0m"
+            echo -e "\e[31m不支持的操作系统: ${ID}\e[0m"
+            echo -e "\e[33m支持的系统: Ubuntu, Debian, CentOS\e[0m"
             exit 1
             ;;
     esac
+    
+    echo -e "\e[34m依赖安装函数执行完成\e[0m"
 }
 
 
@@ -399,21 +453,42 @@ function execute_quick_package_download() {
     
     echo -e "\e[34m正在下载快速更新包...\e[0m"
     echo -e "\e[34m下载地址: \e[36m${QUICK_UPDATE_BASE_PACKAGE}\e[0m"
-    if curl -m 300 -fSLo "${package_dir}/package.tar.gz" "${QUICK_UPDATE_BASE_PACKAGE}"; then
+    
+    # 下载到临时文件进行验证
+    local temp_file="${package_dir}/package.tar.gz.tmp"
+    if curl -m 300 -fSLo "${temp_file}" "${QUICK_UPDATE_BASE_PACKAGE}"; then
         echo -e "\e[34m快速更新包下载成功，正在验证文件...\e[0m"
-        # 检查文件类型
-        file_type=$(file "${package_dir}/package.tar.gz" 2>/dev/null | cut -d: -f2)
+        
+        # 检查文件类型和内容
+        file_type=$(file "${temp_file}" 2>/dev/null | cut -d: -f2)
         echo -e "\e[34m文件类型: \e[36m${file_type}\e[0m"
         
-        if tar -zxf "${package_dir}/package.tar.gz" -C "${package_dir}"; then
-            echo -e "\e[92m快速更新包解压成功\e[0m"
-            rm -f "${package_dir}/package.tar.gz"
-            return 0
+        # 检查是否为HTML文件（代理返回的错误页面）
+        if head -c 100 "${temp_file}" | grep -qi "html\|DOCTYPE"; then
+            echo -e "\e[33m警告：代理返回了HTML页面，可能URL格式不正确\e[0m"
+            echo -e "\e[33m文件大小: $(ls -lh "${temp_file}" | awk '{print $5}')\e[0m"
+            echo -e "\e[33m前100字符: $(head -c 100 "${temp_file}" 2>/dev/null)\e[0m"
+            rm -f "${temp_file}"
+            return 1
+        fi
+        
+        # 验证文件是否为有效的gzip格式
+        if tar -tzf "${temp_file}" >/dev/null 2>&1; then
+            mv "${temp_file}" "${package_dir}/package.tar.gz"
+            if tar -zxf "${package_dir}/package.tar.gz" -C "${package_dir}"; then
+                echo -e "\e[92m快速更新包解压成功\e[0m"
+                rm -f "${package_dir}/package.tar.gz"
+                return 0
+            else
+                echo -e "\e[31m快速更新包解压失败\e[0m"
+                rm -f "${package_dir}/package.tar.gz"
+                return 1
+            fi
         else
-            echo -e "\e[31m快速更新包解压失败\e[0m"
-            echo -e "\e[33m文件大小: $(ls -lh "${package_dir}/package.tar.gz" | awk '{print $5}')\e[0m"
-            echo -e "\e[33m前100字符: $(head -c 100 "${package_dir}/package.tar.gz" 2>/dev/null)\e[0m"
-            rm -f "${package_dir}/package.tar.gz"
+            echo -e "\e[31m下载的文件不是有效的gzip格式\e[0m"
+            echo -e "\e[33m文件大小: $(ls -lh "${temp_file}" | awk '{print $5}')\e[0m"
+            echo -e "\e[33m前100字符: $(head -c 100 "${temp_file}" 2>/dev/null)\e[0m"
+            rm -f "${temp_file}"
             return 1
         fi
     else
@@ -546,17 +621,20 @@ function steam_login() {
     echo -e "\e[33m请输入数字并回车以选择要选择的\e[0m\e[31mSteam\e[0m\e[33m登录操作:\e[0m"
     echo -e "\e[92m1\e[0m.\e[34m选择匿名登录\e[0m"
     echo -e "\e[92m2\e[0m.\e[34m选择账号登录\e[0m\e[32m（登录的账号必须已购买求生之路2）\e[0m"
-    echo -e "\e[33m3秒内未输入将自动选择匿名登录...\e[0m"
+    echo -e "\e[33m5秒内未输入将自动选择匿名登录...\e[0m"
     
-    # 使用更安全的超时输入方式
-    read -t 3 -p "您的选择是: " login_number 2>/dev/null
-    local read_status=$?
+    # 使用更稳定的超时输入方式，增加超时时间到5秒
+    local login_number=""
+    # 如果超时，read 返回非零，使用 || true 防止 set -e 导致脚本退出
+    read -t 5 -p "您的选择是: " login_number 2>/dev/null || true
     
-    if [ $read_status -ne 0 ] || [ -z "$login_number" ]; then
+    if [ -z "$login_number" ]; then
         echo -e "\n\e[32m超时，自动选择匿名登录\e[0m"
         first_anonymous_update_server
         return
     fi
+    
+    echo -e "\n\e[34m您选择了: ${login_number}\e[0m"
     case "${login_number}" in
         1)
             first_anonymous_update_server
@@ -565,7 +643,7 @@ function steam_login() {
             first_account_update_server
             ;;
         *)
-            echo -e "\e[31m无效输入，自动选择匿名登录\e[0m"
+            echo -e "\e[31m无效输入 '${login_number}'，自动选择匿名登录\e[0m"
             first_anonymous_update_server
             ;;
     esac
