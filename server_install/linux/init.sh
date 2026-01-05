@@ -794,7 +794,22 @@ fi
 get_namei() {
 load_arrayii
 
-subfolders=($(ls -d "$folder_path"/*/))
+subfolders=()
+subfolde=()
+
+if [ -d "$folder_path" ]; then
+    for subfolder in "$folder_path"/*/; do
+        if [ -d "$subfolder" ]; then
+            subfolders+=("$subfolder")
+        fi
+    done
+fi
+
+if [ ${#subfolders[@]} -eq 0 ]; then
+    echo -e "\e[31m未在 JS-MODS 目录下找到可用的插件目录\e[0m"
+    echo -e "\e[33m请确认结构为: JS-MODS/插件名字/left4dead2/... ，而不是直接把文件放在 JS-MODS 根目录或只上传压缩包\e[0m"
+    return 1
+fi
 
 count=1
 for subfolder in "${subfolders[@]}"; do
@@ -804,7 +819,7 @@ for subfolder in "${subfolders[@]}"; do
     fi
 
     echo -e "\e[92m$count\e[0m.\e[34m$folder_name\e[0m"
-    subfolde+=($folder_name)
+    subfolde+=("$folder_name")
     ((count++))
 done
 }
@@ -860,6 +875,7 @@ local key
 local rest
 local i
 local -a selected_flags
+local server_root="${DEFAULT_SH}/steamcmd/${DEFAULT_DIR}/left4dead2"
 
 for ((i=0;i<total;i++)); do
     selected_flags[i]=0
@@ -867,6 +883,7 @@ done
 
 while true; do
     printf "\033[2J\033[H"
+    echo -e "\e[36m当前服务端目录: ${server_root}\e[0m"
     echo -e "\e[33m使用方向键↑↓或W/S移动，空格选择或取消选择，回车确认，Q退出\e[0m"
     for ((i=0;i<total;i++)); do
         local mark=" "
