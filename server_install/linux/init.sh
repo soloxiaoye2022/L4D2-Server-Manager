@@ -134,18 +134,26 @@ check_deps() {
     for c in "${req[@]}"; do command -v "$c" >/dev/null 2>&1 || miss+=("$c"); done
     if [ ${#miss[@]} -eq 0 ]; then return 0; fi
     
-    echo -e "${YELLOW}安装依赖: ${miss[*]} ...${NC}"
+    echo -e "${YELLOW}检测到缺失依赖: ${miss[*]}${NC}"
+    local cmd=""
+    if [ -f /etc/debian_version ]; then
+        cmd="apt-get update -qq && apt-get install -y -qq ${miss[*]} lib32gcc-s1 lib32stdc++6 ca-certificates"
+    elif [ -f /etc/redhat-release ]; then
+        cmd="yum install -y -q ${miss[*]} glibc.i686 libstdc++.i686"
+    fi
+
     if [ "$EUID" -ne 0 ]; then
+        if command -v sudo >/dev/null 2>&1; then
+            echo -e "${CYAN}尝试使用 sudo 安装 (可能需输密码)...${NC}"
+            if [ -f /etc/debian_version ]; then sudo dpkg --add-architecture i386 >/dev/null 2>&1; fi
+            if sudo bash -c "$cmd"; then echo -e "${GREEN}安装成功${NC}"; return 0; fi
+        fi
         if command -v pkg >/dev/null; then pkg install -y "${miss[@]}"; return; fi
-        echo -e "${RED}非Root且无pkg，请手动安装: ${miss[*]}${NC}"; read -n 1 -s -r; return
+        echo -e "${RED}无法自动安装。请手动执行: sudo $cmd${NC}"; read -n 1 -s -r; return
     fi
     
-    if [ -f /etc/debian_version ]; then
-        dpkg --add-architecture i386 >/dev/null 2>&1
-        apt-get update -qq && apt-get install -y -qq "${miss[@]}" lib32gcc-s1 lib32stdc++6 ca-certificates
-    elif [ -f /etc/redhat-release ]; then
-        yum install -y -q "${miss[@]}" glibc.i686 libstdc++.i686
-    fi
+    if [ -f /etc/debian_version ]; then dpkg --add-architecture i386 >/dev/null 2>&1; fi
+    eval "$cmd"
 }
 
 check_port() {

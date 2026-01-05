@@ -11,7 +11,7 @@ Designed for Linux environments, supporting all platforms (VPS, Dedicated Server
 *   **📦 Multi-Instance Support**: Deploy unlimited server instances, each with independent configuration and runtime.
 *   **🛡️ Process Watchdog**: Smart `tmux`-based watchdog that automatically restarts the server 5 seconds after a crash.
 *   **🔌 Plugin Manager**: Built-in plugin installer/uninstaller, adapted for multiple instances, supporting one-click installation from JS-MODS.
-*   **🌐 All-Platform Compatibility**: Perfectly supports Root users, Non-Root users, and Termux/Proot/Chroot container environments.
+*   **🌐 All-Platform Compatibility**: Perfectly supports Root users, Non-Root users, and Proot/Chroot container environments.
 
 ## 📥 Quick Start
 
