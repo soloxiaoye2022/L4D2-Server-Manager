@@ -381,9 +381,21 @@ backup_srv() {
     local n="$1"; local p="$2"
     mkdir -p "$BACKUP_DIR"
     local f="bk_${n}_$(date +%Y%m%d_%H%M).tar.gz"
-    echo -e "${CYAN}正在打包...${NC}"
-    tar -czf "${BACKUP_DIR}/$f" --exclude="left4dead2/console.log" --exclude="left4dead2/downloads" -C "$(dirname "$p")" "$(basename "$p")"
-    echo -e "${GREEN}已保存至 backups/$f${NC}"; read -n 1 -s -r
+    echo -e "${CYAN}正在执行精简备份 (仅配置与插件)...${NC}"
+    
+    cd "$p" || return
+    local targets=("run_guard.sh" "left4dead2/addons" "left4dead2/cfg" "left4dead2/host.txt" "left4dead2/motd.txt" "left4dead2/mapcycle.txt" "left4dead2/maplist.txt")
+    local final=()
+    for t in "${targets[@]}"; do if [ -e "$t" ]; then final+=("$t"); fi; done
+    
+    tar -czf "${BACKUP_DIR}/$f" --exclude="left4dead2/addons/sourcemod/logs" --exclude="*.log" "${final[@]}"
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}备份成功: backups/$f ($(du -h "${BACKUP_DIR}/$f" | cut -f1))${NC}"
+    else
+        echo -e "${RED}备份失败${NC}"
+    fi
+    read -n 1 -s -r
 }
 
 #=============================================================================
