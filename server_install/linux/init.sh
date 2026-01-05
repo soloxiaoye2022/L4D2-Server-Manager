@@ -102,7 +102,7 @@ function ensure_network_test() {
 }
 
 PLUGIN_VERSION=(-s -d -n)
-DEFAULT_SH=$(cd $(dirname $0) && pwd)
+DEFAULT_SH=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 folder_path=${DEFAULT_SH}/steamcmd/${DEFAULT_DIR}/JS-MODS
 l4d2_menu=${DEFAULT_SH}/steamcmd/${DEFAULT_DIR}
 plugins_name=${DEFAULT_DIR}_plugins.txt
