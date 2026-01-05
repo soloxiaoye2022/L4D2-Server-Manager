@@ -101,29 +101,43 @@ function network_test() {
 
     # 测试代理 - 添加快速预检机制
     echo -e "\e[34m正在测试代理可用性...\e[0m"
+    local tested_count=0
+    local successful_count=0
+    
     for proxy in "${proxy_arr[@]}"; do
         proxy=${proxy%/}
         local test_url="${proxy}/${check_url}"
         
+        echo -e "\e[34m测试代理: \e[36m${proxy}\e[0m"
+        
         # 先快速测试连接（2秒超时）
-        if curl -k -L --connect-timeout 2 --max-time 2 -o /dev/null -s -w "%{http_code}" "${test_url}" | grep -q "200"; then
+        local quick_test_result=$(curl -k -L --connect-timeout 2 --max-time 2 -o /dev/null -s -w "%{http_code}" "${test_url}" 2>/dev/null)
+        
+        if [ "${quick_test_result}" = "200" ]; then
+            echo -e "\e[34m  快速测试通过，进行完整测速...\e[0m"
             # 连接成功，进行完整测速
-            curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time $((timeout * 2)) -o /dev/null -s -w "%{http_code}:%{speed_download}" "${test_url}")
+            curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time $((timeout * 2)) -o /dev/null -s -w "%{http_code}:%{speed_download}" "${test_url}" 2>/dev/null)
             status=$(echo "${curl_output}" | cut -d: -f1)
             download_speed=$(echo "${curl_output}" | cut -d: -f2 | cut -d. -f1)
-            curl_exit_code=0
-            [ "${status}" != "000" ] && [ -n "${download_speed}" ] && curl_exit_code=0 || curl_exit_code=1
-
-            if [ "${curl_exit_code}" -eq 0 ] && [ "${status}" -eq 200 ] && [ "${download_speed}" -gt 0 ]; then
+            
+            if [ "${status}" = "200" ] && [ -n "${download_speed}" ] && [ "${download_speed}" -gt 0 ]; then
                 local formatted_speed=$(format_speed "${download_speed}")
-                echo -e "\e[34m代理 \e[36m${proxy}\e[0m 速度: \e[92m${formatted_speed}\e[0m"
+                echo -e "\e[34m  速度: \e[92m${formatted_speed}\e[0m"
+                successful_count=$((successful_count + 1))
                 if (( download_speed > best_speed )); then
                     best_speed=${download_speed}
                     best_proxy=${proxy}
                 fi
+            else
+                echo -e "\e[33m  完整测速失败 (状态: ${status}, 速度: ${download_speed})\e[0m"
             fi
+        else
+            echo -e "\e[33m  快速测试失败 (结果: ${quick_test_result})\e[0m"
         fi
+        tested_count=$((tested_count + 1))
     done
+    
+    echo -e "\e[34m代理测试完成: 测试了 ${tested_count} 个, 成功 ${successful_count} 个\e[0m"
 
     if [ -n "${best_proxy}" ]; then
         echo -e "\e[34m选用最快代理: \e[92m${best_proxy}\e[0m"
