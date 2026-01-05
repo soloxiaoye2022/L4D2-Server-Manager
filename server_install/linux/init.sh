@@ -2,24 +2,55 @@
 
 #=============================================================================
 # L4D2 Server Manager (L4M)
-# 功能: 多实例管理、CLI/TUI双模式、自动安装更新、Tmux进程守护
+# 功能: 全平台兼容 (Root/Non-Root/Proot)、多实例管理、CLI/TUI
 #=============================================================================
 
-# 全局配置
-INSTALL_DIR="/usr/local/l4d2_manager"
-BIN_LINK="/usr/bin/l4m"
+# 1. 定义候选安装路径
+SYSTEM_INSTALL_DIR="/usr/local/l4d2_manager"
+USER_INSTALL_DIR="$HOME/.l4d2_manager"
+SYSTEM_BIN="/usr/bin/l4m"
+USER_BIN="$HOME/bin/l4m"
 UPDATE_URL="https://gh-proxy.com/https://raw.githubusercontent.com/soloxiaoye2022/server_install/main/server_install/linux/init.sh"
 
-# 动态判断运行路径
-if [[ "$0" == "$INSTALL_DIR/l4m" ]] || [[ -L "$0" && "$(readlink -f "$0")" == "$INSTALL_DIR/l4m" ]]; then
-    MANAGER_ROOT="$INSTALL_DIR"
+# 2. 智能探测运行环境
+# 判断是否是已安装后的运行
+if [[ "$0" == "$SYSTEM_INSTALL_DIR/l4m" ]] || [[ -L "$0" && "$(readlink -f "$0")" == "$SYSTEM_INSTALL_DIR/l4m" ]]; then
+    MANAGER_ROOT="$SYSTEM_INSTALL_DIR"
+    INSTALL_TYPE="system"
+elif [[ "$0" == "$USER_INSTALL_DIR/l4m" ]] || [[ -L "$0" && "$(readlink -f "$0")" == "$USER_INSTALL_DIR/l4m" ]]; then
+    MANAGER_ROOT="$USER_INSTALL_DIR"
+    INSTALL_TYPE="user"
 else
-    MANAGER_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    # 临时运行模式 (如管道安装)
+    # 检测是否为管道运行: $0 可能是 bash, /dev/fd/..., /proc/self/fd/...
+    if [[ "$0" == *"bash"* ]] || [[ "$0" == *"/fd/"* ]]; then
+        # 管道模式：使用临时目录，避免直接在 /proc 下操作报错
+        MANAGER_ROOT="/tmp/l4m_install_temp"
+        mkdir -p "$MANAGER_ROOT" 2>/dev/null || MANAGER_ROOT="$HOME/.cache/l4m_temp"
+        mkdir -p "$MANAGER_ROOT"
+    else
+        # 脚本直接运行模式
+        MANAGER_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    fi
+    INSTALL_TYPE="temp"
 fi
 
-DATA_FILE="${MANAGER_ROOT}/servers.dat"
-JS_MODS_DIR="${MANAGER_ROOT}/js-mods"
-STEAMCMD_DIR="${MANAGER_ROOT}/steamcmd_common"
+# 3. 确定最终使用的配置路径
+# 如果是临时模式，我们在安装时再决定最终路径；如果是已安装模式，直接使用
+if [[ "$INSTALL_TYPE" != "temp" ]]; then
+    FINAL_ROOT="$MANAGER_ROOT"
+else
+    # 默认尝试系统安装，后续在 install 函数中会根据权限降级
+    if [ "$EUID" -eq 0 ]; then
+        FINAL_ROOT="$SYSTEM_INSTALL_DIR"
+    else
+        FINAL_ROOT="$USER_INSTALL_DIR"
+    fi
+fi
+
+DATA_FILE="${FINAL_ROOT}/servers.dat"
+JS_MODS_DIR="${FINAL_ROOT}/js-mods"
+STEAMCMD_DIR="${FINAL_ROOT}/steamcmd_common"
 DEFAULT_APPID="222860"
 
 # 颜色定义
@@ -32,55 +63,85 @@ GREY='\033[90m'
 NC='\033[0m'
 
 #=============================================================================
-# 0. 系统安装与更新模块
+# 0. 智能安装与更新模块
 #=============================================================================
-install_system_wide() {
-    # 检查 Root 权限
-    if [ "$EUID" -ne 0 ]; then
-        echo -e "${RED}请使用 root 权限运行安装 (sudo bash $0)${NC}"
-        exit 1
-    fi
-
-    echo -e "${CYAN}正在安装 L4D2 Manager 到系统...${NC}"
-
-    # 创建目录
-    mkdir -p "$INSTALL_DIR"
-    mkdir -p "$STEAMCMD_DIR"
-    mkdir -p "$JS_MODS_DIR"
-
-    # 复制脚本
-    if [ -f "$0" ]; then
-        cp "$0" "$INSTALL_DIR/l4m"
-        chmod +x "$INSTALL_DIR/l4m"
+install_smart() {
+    echo -e "${CYAN}正在初始化安装向导...${NC}"
+    
+    # 权限检测与路径选择
+    local target_dir=""
+    local link_path=""
+    
+    if [ "$EUID" -eq 0 ]; then
+        echo -e "${GREEN}检测到 Root 权限，准备进行系统级安装...${NC}"
+        target_dir="$SYSTEM_INSTALL_DIR"
+        link_path="$SYSTEM_BIN"
     else
-        # 如果是通过管道运行 (bash <(curl...))，则下载
-        echo -e "${YELLOW}检测到管道运行，正在下载最新版...${NC}"
-        if ! curl -sL "$UPDATE_URL" -o "$INSTALL_DIR/l4m"; then
-            echo -e "${RED}下载失败。${NC}"
-            exit 1
+        echo -e "${YELLOW}检测到普通用户/容器环境，准备进行用户级安装...${NC}"
+        target_dir="$USER_INSTALL_DIR"
+        link_path="$USER_BIN"
+    fi
+    
+    # 再次确认目标目录可写 (应对只读文件系统等特殊情况)
+    if ! mkdir -p "$target_dir" 2>/dev/null; then
+        if [ "$target_dir" == "$SYSTEM_INSTALL_DIR" ]; then
+             echo -e "${RED}系统目录无法写入，尝试回退到用户目录...${NC}"
+             target_dir="$USER_INSTALL_DIR"
+             link_path="$USER_BIN"
+             mkdir -p "$target_dir" || { echo -e "${RED}无法创建安装目录，安装失败。${NC}"; exit 1; }
+        else
+             echo -e "${RED}无法创建安装目录 $target_dir，请检查权限。${NC}"; exit 1;
         fi
-        chmod +x "$INSTALL_DIR/l4m"
     fi
 
+    echo -e "${CYAN}安装路径: $target_dir${NC}"
+    
+    # 创建子目录
+    mkdir -p "$target_dir"
+    mkdir -p "${target_dir}/steamcmd_common"
+    mkdir -p "${target_dir}/js-mods"
+    
+    # 获取脚本文件
+    if [ -f "$0" ] && [[ "$0" != *"bash"* ]] && [[ "$0" != *"/fd/"* ]]; then
+        cp "$0" "$target_dir/l4m"
+    else
+        echo -e "${YELLOW}正在下载最新版脚本...${NC}"
+        if ! curl -sL "$UPDATE_URL" -o "$target_dir/l4m"; then
+            echo -e "${RED}下载失败，请检查网络。${NC}"; exit 1;
+        fi
+    fi
+    chmod +x "$target_dir/l4m"
+    
     # 创建软链接
-    ln -sf "$INSTALL_DIR/l4m" "$BIN_LINK"
-
-    # 迁移旧数据 (如果存在)
-    if [ -f "${MANAGER_ROOT}/servers.dat" ] && [ "${MANAGER_ROOT}" != "${INSTALL_DIR}" ]; then
-        echo -e "${YELLOW}检测到旧数据，正在迁移...${NC}"
-        cp "${MANAGER_ROOT}/servers.dat" "$INSTALL_DIR/"
+    local bin_dir=$(dirname "$link_path")
+    mkdir -p "$bin_dir"
+    
+    if ln -sf "$target_dir/l4m" "$link_path" 2>/dev/null; then
+        echo -e "${GREEN}链接创建成功: $link_path${NC}"
+    else
+        echo -e "${YELLOW}警告: 无法创建软链接到 $link_path (可能无权限)${NC}"
+        echo -e "您可以手动添加 alias: ${GREY}alias l4m='$target_dir/l4m'${NC}"
     fi
     
-    # 初始化数据文件
-    touch "$INSTALL_DIR/servers.dat"
-
-    echo -e "${GREEN}安装成功！${NC}"
-    echo -e "现在你可以直接输入 ${CYAN}l4m${NC} 来启动管理器。"
-    echo -e "或者使用 ${CYAN}l4m update${NC} 来更新脚本。"
-    sleep 2
+    # 迁移旧数据
+    if [ "$MANAGER_ROOT" != "$target_dir" ] && [ -f "${MANAGER_ROOT}/servers.dat" ]; then
+         echo -e "${YELLOW}迁移旧配置数据...${NC}"
+         cp "${MANAGER_ROOT}/servers.dat" "$target_dir/"
+    fi
+    if [ ! -f "$target_dir/servers.dat" ]; then touch "$target_dir/servers.dat"; fi
     
-    # 切换到安装目录运行
-    exec "$INSTALL_DIR/l4m"
+    # 环境变量提示
+    if [[ "$link_path" == "$USER_BIN" ]]; then
+        if [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
+            echo -e "${YELLOW}提示: 请将 $HOME/bin 加入您的 PATH 环境变量，或者直接运行 ~/.l4d2_manager/l4m${NC}"
+            echo -e "命令: ${GREY}echo 'export PATH=\$PATH:\$HOME/bin' >> ~/.bashrc && source ~/.bashrc${NC}"
+        fi
+    fi
+
+    echo -e "${GREEN}安装完成！${NC}"
+    echo -e "现在输入 ${CYAN}l4m${NC} 即可启动。"
+    sleep 2
+    exec "$target_dir/l4m"
 }
 
 self_update() {
@@ -90,11 +151,11 @@ self_update() {
     if curl -sL "$UPDATE_URL" -o "$temp_file"; then
         # 简单检查文件完整性
         if grep -q "main()" "$temp_file"; then
-            mv "$temp_file" "$INSTALL_DIR/l4m"
-            chmod +x "$INSTALL_DIR/l4m"
+            mv "$temp_file" "$FINAL_ROOT/l4m"
+            chmod +x "$FINAL_ROOT/l4m"
             echo -e "${GREEN}更新成功！重启脚本中...${NC}"
             sleep 1
-            exec "$INSTALL_DIR/l4m"
+            exec "$FINAL_ROOT/l4m"
         else
             echo -e "${RED}更新文件校验失败。${NC}"
             rm -f "$temp_file"
@@ -124,6 +185,20 @@ check_and_install_deps() {
     
     echo -e "${YELLOW}正在后台自动安装缺失依赖: ${missing_deps[*]} ...${NC}"
     
+    # 检测 Proot/Non-Root 环境，如果无 Root 权限则跳过系统包安装，提示用户
+    if [ "$EUID" -ne 0 ]; then
+        echo -e "${YELLOW}非 Root 环境，尝试使用 pkg (Termux) 或跳过...${NC}"
+        if command -v pkg >/dev/null 2>&1; then
+             pkg install -y tmux curl wget tar tree sed gawk
+             return
+        else
+             echo -e "${RED}无 Root 权限且非 Termux，无法自动安装系统依赖。${NC}"
+             echo -e "请确保您已手动安装: ${missing_deps[*]}"
+             read -n 1 -s -r -p "按任意键尝试继续..."
+             return
+        fi
+    fi
+    
     if [ -f /etc/debian_version ]; then
         dpkg --add-architecture i386 >/dev/null 2>&1
         apt-get update -qq >/dev/null 2>&1
@@ -142,7 +217,7 @@ check_and_install_deps() {
 tui_header() {
     clear
     echo -e "${BLUE}==============================================================${NC}"
-    echo -e "${CYAN}             L4D2 Manager (L4M) - CLI/TUI v3.0            ${NC}"
+    echo -e "${CYAN}             L4D2 Manager (L4M) - CLI/TUI v3.1            ${NC}"
     echo -e "${BLUE}==============================================================${NC}"
     echo ""
 }
@@ -242,7 +317,7 @@ deploy_server_wizard() {
     
     local install_path=""
     while [ -z "$install_path" ]; do
-        tui_input "请输入安装目录" "${MANAGER_ROOT}/${srv_name}" "install_path"
+        tui_input "请输入安装目录" "${FINAL_ROOT}/${srv_name}" "install_path"
         if [ -d "$install_path" ] && [ "$(ls -A "$install_path")" ]; then
             echo -e "${RED}目录不为空。${NC}"
             install_path=""
@@ -433,7 +508,7 @@ install_plugins_tui() {
     local target_root="$1/left4dead2"
     # 自动搜索 JS-MODS
     if [ ! -d "$JS_MODS_DIR" ]; then
-        local found=$(find "$MANAGER_ROOT" -maxdepth 4 -type d -name "JS-MODS" -print -quit)
+        local found=$(find "$FINAL_ROOT" -maxdepth 4 -type d -name "JS-MODS" -print -quit)
         if [ -n "$found" ]; then JS_MODS_DIR="$found"; fi
     fi
     
@@ -514,22 +589,27 @@ main() {
     
     # 参数处理
     case "$1" in
-        "install") install_system_wide; exit 0 ;;
+        "install") install_smart; exit 0 ;;
         "update") self_update; exit 0 ;;
     esac
     
-    # 首次运行引导安装
-    if [[ "$MANAGER_ROOT" != "$INSTALL_DIR" ]]; then
+    # 首次运行引导安装 (只在非临时模式下检查)
+    if [[ "$INSTALL_TYPE" == "temp" ]]; then
         tui_header
-        echo -e "${YELLOW}检测到您未安装 L4D2 Manager 到系统。${NC}"
-        echo -e "安装后，您可以通过输入 ${CYAN}l4m${NC} 随时打开管理器，且数据不会丢失。"
+        echo -e "${YELLOW}欢迎使用 L4D2 Manager (管道模式)${NC}"
+        echo -e "我们建议您将其安装到系统，以便持久化数据和便捷访问。"
         echo ""
-        read -p "是否现在安装? (y/n) [默认: y]: " choice
+        read -p "是否安装? (y/n) [默认: y]: " choice
         choice=${choice:-y}
         if [[ "$choice" == "y" || "$choice" == "Y" ]]; then
-            install_system_wide
+            install_smart
             exit 0
         fi
+        # 如果不安装，则继续使用临时目录运行
+    elif [[ "$INSTALL_TYPE" != "system" ]] && [[ "$INSTALL_TYPE" != "user" ]]; then
+        # 兜底逻辑
+        install_smart
+        exit 0
     fi
     
     check_and_install_deps
