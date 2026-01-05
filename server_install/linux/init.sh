@@ -381,14 +381,23 @@ backup_srv() {
     local n="$1"; local p="$2"
     mkdir -p "$BACKUP_DIR"
     local f="bk_${n}_$(date +%Y%m%d_%H%M).tar.gz"
-    echo -e "${CYAN}正在执行精简备份 (含配置、插件及 SQLite 数据)...${NC}"
+    echo -e "${CYAN}正在执行精简备份 (含Metamod、插件清单及数据)...${NC}"
     
     cd "$p" || return
-    local targets=("run_guard.sh" "left4dead2/addons" "left4dead2/cfg" "left4dead2/host.txt" "left4dead2/motd.txt" "left4dead2/mapcycle.txt" "left4dead2/maplist.txt")
+    
+    # 生成插件清单
+    local list="installed_plugins.txt"
+    echo "Backup Time: $(date)" > "$list"
+    echo "Server: $n" >> "$list"
+    echo "--- Addons ---" >> "$list"
+    if [ -d "left4dead2/addons" ]; then ls -1 "left4dead2/addons" >> "$list"; fi
+    
+    local targets=("run_guard.sh" "left4dead2/addons" "left4dead2/cfg" "left4dead2/host.txt" "left4dead2/motd.txt" "left4dead2/mapcycle.txt" "left4dead2/maplist.txt" "$list")
     local final=()
     for t in "${targets[@]}"; do if [ -e "$t" ]; then final+=("$t"); fi; done
     
     tar -czf "${BACKUP_DIR}/$f" --exclude="left4dead2/addons/sourcemod/logs" --exclude="*.log" "${final[@]}"
+    rm -f "$list"
     
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}备份成功: backups/$f ($(du -h "${BACKUP_DIR}/$f" | cut -f1))${NC}"
