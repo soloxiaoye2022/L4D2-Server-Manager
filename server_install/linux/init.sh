@@ -304,11 +304,26 @@ deploy_wizard() {
     local script="${path}/update.txt"
     if [ "$mode" == "2" ]; then
         local u p; tui_input "账号" "" "u"; tui_input "密码" "" "p" "true"
-        echo "force_install_dir \"$path\"" > "$script"; echo "login $u $p" >> "$script"
-        echo "app_update $DEFAULT_APPID validate" >> "$script"; echo "quit" >> "$script"
+        echo "force_install_dir \"$path\"" > "$script"
+        echo "login $u $p" >> "$script"
+        echo "@sSteamCmdForcePlatformType linux" >> "$script"
+        echo "app_update $DEFAULT_APPID validate" >> "$script"
+        echo "quit" >> "$script"
         "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$script"
     else
-        "${STEAMCMD_DIR}/steamcmd.sh" +force_install_dir "$path" +login anonymous +app_update $DEFAULT_APPID validate +quit
+        echo "force_install_dir \"$path\"" > "$script"
+        echo "login anonymous" >> "$script"
+        echo "@sSteamCmdForcePlatformType linux" >> "$script"
+        echo "app_info_update 1" >> "$script"
+        echo "app_update $DEFAULT_APPID" >> "$script"
+        echo "@sSteamCmdForcePlatformType windows" >> "$script"
+        echo "app_info_update 1" >> "$script"
+        echo "app_update $DEFAULT_APPID" >> "$script"
+        echo "@sSteamCmdForcePlatformType linux" >> "$script"
+        echo "app_info_update 1" >> "$script"
+        echo "app_update $DEFAULT_APPID validate" >> "$script"
+        echo "quit" >> "$script"
+        "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$script"
     fi
     
     if [ ! -f "${path}/srcds_run" ]; then echo -e "${RED}失败${NC}"; read -n 1 -s -r; return; fi
