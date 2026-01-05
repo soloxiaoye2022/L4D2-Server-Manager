@@ -301,8 +301,7 @@ deploy_wizard() {
         if grep -q "^${name}|" "$DATA_FILE"; then echo -e "${RED}名称已存在${NC}"; name=""; fi
     done
     
-    local def_path=""
-    if [ "$EUID" -eq 0 ]; then def_path="/opt/L4D2_Servers/${name}"; else def_path="$HOME/L4D2_Servers/${name}"; fi
+    local def_path="$HOME/L4D2_Servers/${name}"
     
     local path=""; while [ -z "$path" ]; do
         tui_input "安装目录" "$def_path" "path"
