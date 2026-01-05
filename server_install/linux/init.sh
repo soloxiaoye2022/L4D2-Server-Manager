@@ -381,7 +381,7 @@ backup_srv() {
     local n="$1"; local p="$2"
     mkdir -p "$BACKUP_DIR"
     local f="bk_${n}_$(date +%Y%m%d_%H%M).tar.gz"
-    echo -e "${CYAN}正在执行精简备份 (仅配置与插件)...${NC}"
+    echo -e "${CYAN}正在执行精简备份 (含配置、插件及 SQLite 数据)...${NC}"
     
     cd "$p" || return
     local targets=("run_guard.sh" "left4dead2/addons" "left4dead2/cfg" "left4dead2/host.txt" "left4dead2/motd.txt" "left4dead2/mapcycle.txt" "left4dead2/maplist.txt")
