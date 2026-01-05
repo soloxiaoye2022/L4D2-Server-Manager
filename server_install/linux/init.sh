@@ -1,5 +1,19 @@
 #!/bin/bash
 
+# 0. 强制设置 Locale 为 UTF-8，解决中文乱码问题
+if command -v locale >/dev/null 2>&1; then
+    if locale -a | grep -q "C.UTF-8"; then
+        export LANG=C.UTF-8; export LC_ALL=C.UTF-8
+    elif locale -a | grep -q "zh_CN.UTF-8"; then
+        export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8
+    else
+        export LANG=en_US.UTF-8; export LC_ALL=en_US.UTF-8
+    fi
+else
+    # 兜底 (Proot 环境可能没有 locale 命令)
+    export LANG=C.UTF-8; export LC_ALL=C.UTF-8
+fi
+
 #=============================================================================
 # L4D2 Server Manager (L4M)
 # 功能: 全平台兼容 (Root/Non-Root/Proot)、多实例管理、CLI/TUI、自启/备份
