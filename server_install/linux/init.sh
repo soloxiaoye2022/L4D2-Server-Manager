@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 DEFAULT_DIR="test"
 DEFAULT_IP="0.0.0.0"
@@ -101,8 +102,17 @@ function ensure_network_test() {
     NETWORK_TEST_DONE=true
 }
 
+
+DEFAULT_SH=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)
+
+case "${DEFAULT_SH:-}" in
+    /proc/*|/dev/*|/tmp/*|"")
+        DEFAULT_SH=$HOME
+        echo "[INFO] 检测到管道/source执行，自动切换到 $DEFAULT_SH"
+        ;;
+esac
+
 PLUGIN_VERSION=(-s -d -n)
-DEFAULT_SH=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 folder_path=${DEFAULT_SH}/steamcmd/${DEFAULT_DIR}/JS-MODS
 l4d2_menu=${DEFAULT_SH}/steamcmd/${DEFAULT_DIR}
 plugins_name=${DEFAULT_DIR}_plugins.txt
