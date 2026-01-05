@@ -699,31 +699,45 @@ update_srv() {
         stop_srv "$n"
     fi
     
-    local script="${p}/update.txt"
-    if [ ! -f "$script" ]; then
-        echo -e "$M_NO_UPDATE_SCRIPT"
+    # 1. 更新中央缓存 (纯英文路径，规避 SteamCMD 乱码)
+    echo -e "$M_UPDATE_CACHE"
+    mkdir -p "$SERVER_CACHE_DIR"
+    local cache_script="${SERVER_CACHE_DIR}/update_cache.txt"
+    
+    if [ ! -f "$cache_script" ]; then
         echo -e "$M_ASK_REBUILD"
         read -p "> " c
         if [[ "$c" == "y" || "$c" == "Y" ]]; then
-            echo "force_install_dir \"$p\"" > "$script"
-            echo "login anonymous" >> "$script"
-            echo "@sSteamCmdForcePlatformType linux" >> "$script"
-            echo "app_info_update 1" >> "$script"
-            echo "app_update $DEFAULT_APPID" >> "$script"
-            echo "@sSteamCmdForcePlatformType windows" >> "$script"
-            echo "app_info_update 1" >> "$script"
-            echo "app_update $DEFAULT_APPID" >> "$script"
-            echo "@sSteamCmdForcePlatformType linux" >> "$script"
-            echo "app_info_update 1" >> "$script"
-            echo "app_update $DEFAULT_APPID validate" >> "$script"
-            echo "quit" >> "$script"
+            echo "force_install_dir \"$SERVER_CACHE_DIR\"" > "$cache_script"
+            echo "login anonymous" >> "$cache_script"
+            echo "@sSteamCmdForcePlatformType linux" >> "$cache_script"
+            echo "app_info_update 1" >> "$cache_script"
+            echo "app_update $DEFAULT_APPID" >> "$cache_script"
+            echo "@sSteamCmdForcePlatformType windows" >> "$cache_script"
+            echo "app_info_update 1" >> "$cache_script"
+            echo "app_update $DEFAULT_APPID" >> "$cache_script"
+            echo "@sSteamCmdForcePlatformType linux" >> "$cache_script"
+            echo "app_info_update 1" >> "$cache_script"
+            echo "app_update $DEFAULT_APPID validate" >> "$cache_script"
+            echo "quit" >> "$cache_script"
         else
             return
         fi
     fi
     
     echo -e "$M_CALL_STEAMCMD"
-    "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$script" | grep -v "CHTTPClientThreadPool"
+    export LANG=en_US.UTF-8; export LC_ALL=en_US.UTF-8
+    "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$cache_script" | grep -v "CHTTPClientThreadPool"
+    
+    # 2. 同步到实例 (支持中文路径)
+    echo -e "$M_COPY_CACHE"
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -a --info=progress2 --exclude="server.cfg" --exclude="banned_user.cfg" --exclude="banned_ip.cfg" "$SERVER_CACHE_DIR/" "$p/"
+    else
+        # cp -u 无法排除文件，但 server.cfg 通常不在纯净包里，风险较低
+        cp -rfu "$SERVER_CACHE_DIR/"* "$p/"
+    fi
+    
     echo -e "\n${GREEN}======================================${NC}"
     echo -e "${GREEN}        $M_SUCCESS $M_UPDATED            ${NC}"
     echo -e "${GREEN}======================================${NC}"
