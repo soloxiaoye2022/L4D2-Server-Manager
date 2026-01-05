@@ -256,7 +256,7 @@ view_traffic() {
 #=============================================================================
 # 2. TUI 库
 #=============================================================================
-tui_header() { clear; echo -e "${BLUE}=== L4D2 Manager (L4M) v3.2 ===${NC}\n"; }
+tui_header() { clear; echo -e "${BLUE}=== L4D2 Manager (L4M) ===${NC}\n"; }
 
 tui_input() {
     local p="$1"; local d="$2"; local v="$3"; local pass="$4"
@@ -341,7 +341,7 @@ deploy_wizard() {
     
     if [ ! -f "${path}/srcds_run" ]; then
         echo -e "\n${RED}======================================${NC}"
-        echo -e "${RED}        ❌ 部署失败 / FAILED          ${NC}"
+        echo -e "${RED}        [FAILED] 部署失败             ${NC}"
         echo -e "${RED}======================================${NC}"
         echo -e "未找到 srcds_run，请检查上方 SteamCMD 报错。"
         read -n 1 -s -r; return
@@ -358,7 +358,7 @@ deploy_wizard() {
     # 格式: Name|Path|Status|Port|AutoStart
     echo "${name}|${path}|STOPPED|27015|false" >> "$DATA_FILE"
     echo -e "\n${GREEN}======================================${NC}"
-    echo -e "${GREEN}        ✅ 部署成功 / SUCCESS         ${NC}"
+    echo -e "${GREEN}        [SUCCESS] 部署成功            ${NC}"
     echo -e "${GREEN}======================================${NC}"
     echo -e "服务器已就绪: ${CYAN}${path}${NC}"
     read -n 1 -s -r
@@ -451,7 +451,7 @@ update_srv() {
     echo -e "${CYAN}正在调用 SteamCMD 更新...${NC}"
     "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$script" | grep -v "CHTTPClientThreadPool"
     echo -e "\n${GREEN}======================================${NC}"
-    echo -e "${GREEN}        ✅ 更新完成 / UPDATED         ${NC}"
+    echo -e "${GREEN}        [SUCCESS] 更新完成            ${NC}"
     echo -e "${GREEN}======================================${NC}"
     read -n 1 -s -r
 }
@@ -673,7 +673,7 @@ main() {
         echo -e "  • ${GREEN}便捷访问${NC}: 安装后只需输入 ${CYAN}l4m${NC} 即可随时管理。"
         echo -e "  • ${GREEN}高级功能${NC}: 支持开机自启、流量监控等特性。"
         echo ""
-        read -p "是否立即安装到系统? (y/n) [默认: y]: " c
+        read -p "是否立即安装到系统? (Y/n): " c
         c=${c:-y}
         if [[ "$c" == "y" || "$c" == "Y" ]]; then install_smart; exit 0; fi
         echo -e "${GREY}进入临时运行模式...${NC}"; sleep 1
