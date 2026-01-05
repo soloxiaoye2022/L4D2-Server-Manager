@@ -322,7 +322,7 @@ deploy_wizard() {
         echo "@sSteamCmdForcePlatformType linux" >> "$script"
         echo "app_update $DEFAULT_APPID validate" >> "$script"
         echo "quit" >> "$script"
-        "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$script"
+        "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$script" | grep -v "CHTTPClientThreadPool"
     else
         echo "force_install_dir \"$path\"" > "$script"
         echo "login anonymous" >> "$script"
@@ -336,10 +336,16 @@ deploy_wizard() {
         echo "app_info_update 1" >> "$script"
         echo "app_update $DEFAULT_APPID validate" >> "$script"
         echo "quit" >> "$script"
-        "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$script"
+        "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$script" | grep -v "CHTTPClientThreadPool"
     fi
     
-    if [ ! -f "${path}/srcds_run" ]; then echo -e "${RED}失败${NC}"; read -n 1 -s -r; return; fi
+    if [ ! -f "${path}/srcds_run" ]; then
+        echo -e "\n${RED}======================================${NC}"
+        echo -e "${RED}        ❌ 部署失败 / FAILED          ${NC}"
+        echo -e "${RED}======================================${NC}"
+        echo -e "未找到 srcds_run，请检查上方 SteamCMD 报错。"
+        read -n 1 -s -r; return
+    fi
     
     mkdir -p "${path}/left4dead2/cfg"
     if [ ! -f "${path}/left4dead2/cfg/server.cfg" ]; then
@@ -351,7 +357,11 @@ deploy_wizard() {
     
     # 格式: Name|Path|Status|Port|AutoStart
     echo "${name}|${path}|STOPPED|27015|false" >> "$DATA_FILE"
-    echo -e "${GREEN}成功!${NC}"; read -n 1 -s -r
+    echo -e "\n${GREEN}======================================${NC}"
+    echo -e "${GREEN}        ✅ 部署成功 / SUCCESS         ${NC}"
+    echo -e "${GREEN}======================================${NC}"
+    echo -e "服务器已就绪: ${CYAN}${path}${NC}"
+    read -n 1 -s -r
 }
 
 #=============================================================================
@@ -439,8 +449,11 @@ update_srv() {
     fi
     
     echo -e "${CYAN}正在调用 SteamCMD 更新...${NC}"
-    "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$script"
-    echo -e "${GREEN}完成${NC}"; read -n 1 -s -r
+    "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$script" | grep -v "CHTTPClientThreadPool"
+    echo -e "\n${GREEN}======================================${NC}"
+    echo -e "${GREEN}        ✅ 更新完成 / UPDATED         ${NC}"
+    echo -e "${GREEN}======================================${NC}"
+    read -n 1 -s -r
 }
 
 start_srv() {
