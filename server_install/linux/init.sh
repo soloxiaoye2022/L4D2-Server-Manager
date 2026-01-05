@@ -12,8 +12,6 @@ START_PARAMETERS="-strictportbind -nobreakpad -noassert -ip ${DEFAULT_IP} -port 
 STEAMCMD_URL="https://cdn.steamchina.eccdnx.com/client/installer/steamcmd_linux.tar.gz"
 STEAMCMD_BASE_URI="https://github.com/apples1949/SteamCmdLinuxFile/releases/download/steamcmd-latest/steamcmd_linux.tar.gz"
 QUICK_UPDATE_BASE_PACKAGE="https://github.com/apples1949/SteamCmdLinuxFile/releases/download/steamcmd-latest/package.tar.gz"
-STEAMCMD_QUICK_URI="https://gh-proxy.com/${STEAMCMD_BASE_URI}"
-QUICK_UPDATE_PACKAGE="https://gh-proxy.com/${QUICK_UPDATE_BASE_PACKAGE}"
 
 NETWORK_TEST_DONE=false
 
@@ -99,11 +97,11 @@ function ensure_network_test() {
     network_test
     
     if [ -n "${SELECTED_PROXY}" ]; then
-        STEAMCMD_QUICK_URI="${SELECTED_PROXY}/${STEAMCMD_BASE_URI}"
-        QUICK_UPDATE_PACKAGE="${SELECTED_PROXY}/${QUICK_UPDATE_BASE_PACKAGE}"
+        STEAMCMD_URL="${SELECTED_PROXY}/${STEAMCMD_BASE_URI}"
+        STEAMCMD_BASE_URI="${SELECTED_PROXY}/${QUICK_UPDATE_BASE_PACKAGE}"
     else
-        STEAMCMD_QUICK_URI="${STEAMCMD_BASE_URI}"
-        QUICK_UPDATE_PACKAGE="${QUICK_UPDATE_BASE_PACKAGE}"
+        STEAMCMD_URL="${STEAMCMD_BASE_URI}"
+        STEAMCMD_BASE_URI="${QUICK_UPDATE_BASE_PACKAGE}"
     fi
     NETWORK_TEST_DONE=true
 }
@@ -327,7 +325,7 @@ function execute_quick_package_download() {
     rm -rf "${package_dir}"/*
     
     echo -e "\e[34m正在下载快速更新包...\e[0m"
-    if curl -m 300 -fSLo "${package_dir}/package.tar.gz" "${QUICK_UPDATE_PACKAGE}"; then
+    if curl -m 300 -fSLo "${package_dir}/package.tar.gz" "${STEAMCMD_BASE_URI}"; then
         echo -e "\e[34m快速更新包下载成功，正在解压...\e[0m"
         if tar -zxf "${package_dir}/package.tar.gz" -C "${package_dir}"; then
             echo -e "\e[92m快速更新包解压成功\e[0m"
@@ -401,9 +399,9 @@ function install_server() {
         fi
     fi
 
-    echo -e "\e[34msteamcmd\e[0m 正在下载Github代理加速源 \e[92m${STEAMCMD_QUICK_URI}\e[0m"
-    if ! curl -m 180 -fSLo "${TMPDIR}/steamcmd.tar.gz" "${STEAMCMD_QUICK_URI}"; then
-        echo -e "\e[34msteamcmd\e[0m \e[31mGithub代理加速源(${STEAMCMD_QUICK_URI})下载失败 \e[0m"
+    echo -e "\e[34msteamcmd\e[0m 正在下载Github代理加速源 \e[92m${STEAMCMD_URL}\e[0m"
+    if ! curl -m 180 -fSLo "${TMPDIR}/steamcmd.tar.gz" "${STEAMCMD_URL}"; then
+        echo -e "\e[34msteamcmd\e[0m \e[31mGithub代理加速源(${STEAMCMD_URL})下载失败 \e[0m"
         echo -e "\e[34msteamcmd\e[0m 尝试下载官方源\e[92m${STEAMCMD_URL}\e[0m"
         if ! curl --connect-timeout 10 -m 60 -fSLo "${TMPDIR}/steamcmd.tar.gz" "${STEAMCMD_URL}"; then
             echo -e "\e[34msteamcmd\e[0m \e[31m官方源\e[92m${STEAMCMD_URL}\e[0m下载失败\e[0m"
