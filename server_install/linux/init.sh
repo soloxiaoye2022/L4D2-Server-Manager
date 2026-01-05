@@ -359,6 +359,7 @@ function download_and_extract_quick_package() {
 }
 
 function install_server() {
+    ensure_network_test
     trap 'rm -rf "${TMPDIR}"' EXIT
     TMPDIR=$(mktemp -d)
     if [ "${?}" -ne 0 ]; then
@@ -380,7 +381,7 @@ function install_server() {
         echo -e "\e[0m请检查\e[31m服务端目录\e[0m\e[0m是否还有未备份的文件\e[0m"
         echo -e "\e[0m第一次下载服务端可无视此提示\e[0m"
         
-        function execute_delete_server_dir() {
+        execute_delete_server_dir() {
             rm -rf "${DEFAULT_SH}/steamcmd/${DEFAULT_DIR}"
             steam_login
         }
@@ -842,14 +843,14 @@ function main() {
                     shift
                 fi
                 ;;
-            --skip-updata|-su)
+            --skip-update|-su)
                 if [ -n "$2" ] && [ -n "$3" ]; then
                     STEAM_ACCOUNT="$2"
                     STEAM_PASSWORD="$3"
                     SKIP_UPDATE="account"
                     shift 3
                 else
-                    echo -e "\e[33m警告：--skip-updata 参数需要 Steam 账户和密码，使用默认行为\e[0m"
+                    echo -e "\e[33m警告：--skip-update 参数需要 Steam 账户和密码，使用默认行为\e[0m"
                     shift
                 fi
                 ;;
