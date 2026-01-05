@@ -98,7 +98,7 @@ install_smart() {
         cp "$0" "$target_dir/l4m"
     else
         echo -e "${YELLOW}下载最新脚本...${NC}"
-        curl -sL "$UPDATE_URL" -o "$target_dir/l4m" || { echo -e "${RED}下载失败${NC}"; exit 1; }
+        curl -L -# "$UPDATE_URL" -o "$target_dir/l4m" || { echo -e "${RED}下载失败${NC}"; exit 1; }
     fi
     chmod +x "$target_dir/l4m"
     
@@ -126,7 +126,7 @@ install_smart() {
 self_update() {
     echo -e "${CYAN}检查更新...${NC}"
     local temp="/tmp/l4m_upd.sh"
-    if curl -sL "$UPDATE_URL" -o "$temp"; then
+    if curl -L -# "$UPDATE_URL" -o "$temp"; then
         if grep -q "main()" "$temp"; then
             mv "$temp" "$FINAL_ROOT/l4m"; chmod +x "$FINAL_ROOT/l4m"
             echo -e "${GREEN}更新成功！${NC}"; sleep 1; exec "$FINAL_ROOT/l4m"
@@ -290,7 +290,15 @@ tui_menu() {
 install_steamcmd() {
     if [ ! -f "${STEAMCMD_DIR}/steamcmd.sh" ]; then
         echo -e "${YELLOW}初始化 SteamCMD...${NC}"; mkdir -p "${STEAMCMD_DIR}"
-        curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar zxvf - -C "${STEAMCMD_DIR}"
+        echo -e "${CYAN}正在下载 SteamCMD 安装包...${NC}"
+        local tmp="/tmp/steamcmd.tar.gz"
+        if wget -O "$tmp" "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"; then
+            echo -e "${CYAN}解压中...${NC}"
+            tar zxf "$tmp" -C "${STEAMCMD_DIR}"
+            rm -f "$tmp"
+        else
+            echo -e "${RED}[FAILED] 下载失败${NC}"; return 1
+        fi
     fi
 }
 
@@ -660,7 +668,7 @@ inst_plat() {
         echo -e "MetaMod: ${GREY}$(basename "$m")${NC}"
         echo -e "SourceMod: ${GREY}$(basename "$s")${NC}"
         
-        if ! wget -qO mm.tar.gz "$m" || ! wget -qO sm.tar.gz "$s"; then
+        if ! wget -O mm.tar.gz "$m" || ! wget -O sm.tar.gz "$s"; then
              echo -e "${RED}[FAILED] 下载失败${NC}"; rm -f mm.tar.gz sm.tar.gz; read -n 1 -s -r; return
         fi
         
