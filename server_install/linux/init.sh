@@ -585,8 +585,19 @@ main() {
     esac
     
     if [[ "$INSTALL_TYPE" == "temp" ]]; then
-        tui_header; echo -e "${YELLOW}建议安装到系统${NC}\n"; read -p "安装? (y/n): " c
+        tui_header
+        echo -e "${YELLOW}欢迎使用 L4D2 Server Manager (L4M)${NC}"
+        echo -e "检测到您当前通过临时方式运行 (管道/临时目录)。"
+        echo ""
+        echo -e "为了获得最佳体验，建议将管理器安装到系统："
+        echo -e "  • ${GREEN}数据持久化${NC}: 服务器配置和数据将安全保存，防误删。"
+        echo -e "  • ${GREEN}便捷访问${NC}: 安装后只需输入 ${CYAN}l4m${NC} 即可随时管理。"
+        echo -e "  • ${GREEN}高级功能${NC}: 支持开机自启、流量监控等特性。"
+        echo ""
+        read -p "是否立即安装到系统? (y/n) [默认: y]: " c
+        c=${c:-y}
         if [[ "$c" == "y" || "$c" == "Y" ]]; then install_smart; exit 0; fi
+        echo -e "${GREY}进入临时运行模式...${NC}"; sleep 1
     fi
     
     check_deps
