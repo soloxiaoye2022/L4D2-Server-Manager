@@ -820,41 +820,120 @@ done
 
 }
 
-plugins_install() {
-echo -e "\e[36m请输入需要安装的插件数字，用分号\e[0m\e[41m（;）\e[0m\e[36m隔开\e[0m\e[41m（注意；数字如果错误一个则需要全部重新输入）\e[0m"
-read user_input
-IFS=";" read -ra input_numbers <<< "$user_input"
+function select_plugins_tui() {
+if [ ${#subfolde[@]} -eq 0 ]; then
+    echo -e "\e[31m没有可安装的插件\e[0m"
+    return 1
+fi
 
-for number in "${input_numbers[@]}"; do
-    if [[ $number =~ ^[0-9]+$ ]]; then
-        index=$((number - 1))
-        if [[ $number -ge 1 && $number -le ${#subfolde[@]} ]]; then
-            selected_folders+=("${subfolde[number-1]}")
-        else
-            echo -e "\e[31m无效的数字\e[0m：\e[36m$number\e[0m，\e[31m请重新输入\e[0m"
-        fi
-        
-        if ((index >= 0 && index < ${#subfolde[@]})); then
-            selected_subfolder="${subfolde[index]}"
-            folder_name=$(basename "$selected_subfolder")
-            test_name+=($(basename "$folder_name"))
-            echo -e "\e[46;34m正在安装插件\e[0m：\e[36m$folder_name\e[0m"
-            progress_runi
-            echo -e "\e[46;34m安装完成\e[0m"
+local total=${#subfolde[@]}
+local cursor=0
+local key
+local rest
+local i
+local -a selected_flags
 
-        else
-            echo -e "\e[31m无效的数字\e[0m：\e[36m$number\e[0m，\e[31m请重新输入\e[0m"
-            plugins_install
+for ((i=0;i<total;i++)); do
+    selected_flags[i]=0
+done
+
+while true; do
+    printf "\033[2J\033[H"
+    echo -e "\e[33m使用方向键↑↓或W/S移动，空格选择或取消选择，回车确认，Q退出\e[0m"
+    for ((i=0;i<total;i++)); do
+        local mark=" "
+        if [ "${selected_flags[i]}" -eq 1 ]; then
+            mark="✔"
         fi
-    else
-        echo -e "\e[31m无效的输入\e[0m：\e[36m$number\e[0m，\e[31m请重新输入\e[0m"
-        plugins_install
+        local prefix="  "
+        if [ "$i" -eq "$cursor" ]; then
+            prefix="> "
+        fi
+        local num=$((i+1))
+        echo -e "${prefix}[${mark}] ${num}. ${subfolde[i]}"
+    done
+
+    read -rsn1 key 2>/dev/null || key=""
+    case "$key" in
+        "")
+            break
+            ;;
+        " ")
+            if [ "${selected_flags[cursor]}" -eq 1 ]; then
+                selected_flags[cursor]=0
+            else
+                selected_flags[cursor]=1
+            fi
+            ;;
+        q|Q)
+            echo -e "\e[33m已取消插件选择\e[0m"
+            return 1
+            ;;
+        w|W)
+            if [ "$cursor" -gt 0 ]; then
+                cursor=$((cursor-1))
+            else
+                cursor=$((total-1))
+            fi
+            ;;
+        s|S)
+            if [ "$cursor" -lt $((total-1)) ]; then
+                cursor=$((cursor+1))
+            else
+                cursor=0
+            fi
+            ;;
+        $'\x1b')
+            read -rsn2 rest 2>/dev/null || rest=""
+            case "$rest" in
+                "[A")
+                    if [ "$cursor" -gt 0 ]; then
+                        cursor=$((cursor-1))
+                    else
+                        cursor=$((total-1))
+                    fi
+                    ;;
+                "[B")
+                    if [ "$cursor" -lt $((total-1)) ]; then
+                        cursor=$((cursor+1))
+                    else
+                        cursor=0
+                    fi
+                    ;;
+            esac
+            ;;
+    esac
+done
+
+selected_folders=()
+test_name=()
+for ((i=0;i<total;i++)); do
+    if [ "${selected_flags[i]}" -eq 1 ]; then
+        selected_folders+=("${subfolde[i]}")
+        test_name+=("${subfolde[i]}")
     fi
 done
 
+if [ "${#selected_folders[@]}" -eq 0 ]; then
+    echo -e "\e[33m未选择任何插件\e[0m"
+    return 1
+fi
+
+return 0
+}
+
+plugins_install() {
+if ! select_plugins_tui; then
+    return
+fi
+
+for folder_name in "${selected_folders[@]}"; do
+    echo -e "\e[46;34m正在安装插件\e[0m：\e[36m$folder_name\e[0m"
+    progress_runi
+    echo -e "\e[46;34m安装完成\e[0m"
+done
+
 printf "%s\n" "${test_name[@]}" >> "$plugins_name"
-
-
 }
 
 plugins_unload() {
@@ -890,6 +969,12 @@ done
 }
 
 function mixed_platform() {
+    if [ ! -d "${DEFAULT_SH}/steamcmd/${DEFAULT_DIR}/left4dead2" ]; then
+        echo -e "\e[31m未检测到已安装的left4dead2服务端目录\e[0m"
+        echo -e "\e[33m请先执行“0.安装依赖并下载服务端”或“2.下载游戏服务端”后再安装插件平台\e[0m"
+        return 1
+    fi
+
     trap 'rm -rf "${DLDIR}"' EXIT
     DLDIR=$(mktemp -d)
     if [ "${?}" -ne 0 ]; then
@@ -897,7 +982,7 @@ function mixed_platform() {
         exit 1
     fi
 
-    if [ -z "${1}" ]; then
+    if [ $# -eq 0 ]; then
         echo -e "\e[33m请选择要安装的插件平台版本:\e[0m"
         echo -e "\e[92m1\e[0m.\e[34m稳定版(默认)\e[0m"
         echo -e "\e[92m2\e[0m.\e[34m测试版\e[0m"
