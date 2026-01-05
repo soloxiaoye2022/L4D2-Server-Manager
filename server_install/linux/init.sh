@@ -2,11 +2,11 @@
 
 # 0. 强制设置 Locale 为 UTF-8，解决中文乱码问题
 if command -v locale >/dev/null 2>&1; then
-    if locale -a | grep -q "C.UTF-8"; then
+    if locale -a 2>/dev/null | grep -q "C.UTF-8"; then
         export LANG=C.UTF-8; export LC_ALL=C.UTF-8
-    elif locale -a | grep -q "zh_CN.UTF-8"; then
+    elif locale -a 2>/dev/null | grep -q "zh_CN.UTF-8"; then
         export LANG=zh_CN.UTF-8; export LC_ALL=zh_CN.UTF-8
-    else
+    elif locale -a 2>/dev/null | grep -q "en_US.UTF-8"; then
         export LANG=en_US.UTF-8; export LC_ALL=en_US.UTF-8
     fi
 else
@@ -60,6 +60,48 @@ STEAMCMD_DIR="${FINAL_ROOT}/steamcmd_common"
 TRAFFIC_DIR="${FINAL_ROOT}/traffic_logs"
 BACKUP_DIR="${FINAL_ROOT}/backups"
 DEFAULT_APPID="222860"
+CONFIG_FILE="${FINAL_ROOT}/config.dat"
+
+# I18N
+load_i18n() {
+    if [ "$1" == "zh" ]; then
+        M_TITLE="=== L4D2 管理器 (L4M) ==="
+        M_WELCOME="欢迎使用 L4D2 Server Manager (L4M)"
+        M_TEMP_RUN="检测到您当前通过临时方式运行 (管道/临时目录)。"
+        M_REC_INSTALL="为了获得最佳体验，建议将管理器安装到系统："
+        M_F_PERSIST="  • ${GREEN}数据持久化${NC}: 服务器配置和数据将安全保存，防误删。"
+        M_F_ACCESS="  • ${GREEN}便捷访问${NC}: 安装后只需输入 ${CYAN}l4m${NC} 即可随时管理。"
+        M_F_ADV="  • ${GREEN}高级功能${NC}: 支持开机自启、流量监控等特性。"
+        M_ASK_INSTALL="是否立即安装到系统? (Y/n): "
+        M_TEMP_MODE="${GREY}进入临时运行模式...${NC}"
+        M_MAIN_MENU="L4M 主菜单"
+        M_DEPLOY="部署新实例"
+        M_MANAGE="实例管理"
+        M_UPDATE="系统更新"
+        M_LANG="切换语言 / Language"
+        M_EXIT="退出"
+        M_SUCCESS="${GREEN}[成功]${NC}"
+        M_FAILED="${RED}[失败]${NC}"
+    else
+        M_TITLE="=== L4D2 Manager (L4M) ==="
+        M_WELCOME="Welcome to L4D2 Server Manager (L4M)"
+        M_TEMP_RUN="Detected temporary run mode (Pipe/Temp Dir)."
+        M_REC_INSTALL="It is recommended to install L4M to system for best experience:"
+        M_F_PERSIST="  • ${GREEN}Persistence${NC}: Configs and data are saved safely."
+        M_F_ACCESS="  • ${GREEN}Easy Access${NC}: Type ${CYAN}l4m${NC} to manage anytime."
+        M_F_ADV="  • ${GREEN}Advanced${NC}: Auto-start, Traffic Monitor supported."
+        M_ASK_INSTALL="Install to system now? (Y/n): "
+        M_TEMP_MODE="${GREY}Entering temporary mode...${NC}"
+        M_MAIN_MENU="Main Menu"
+        M_DEPLOY="Deploy New Instance"
+        M_MANAGE="Manage Instances"
+        M_UPDATE="System Update"
+        M_LANG="Change Language"
+        M_EXIT="Exit"
+        M_SUCCESS="${GREEN}[SUCCESS]${NC}"
+        M_FAILED="${RED}[FAILED]${NC}"
+    fi
+}
 
 # 颜色定义
 RED='\033[31m'
@@ -259,7 +301,7 @@ view_traffic() {
 #=============================================================================
 # 2. TUI 库
 #=============================================================================
-tui_header() { clear; echo -e "${BLUE}=== L4D2 Manager (L4M) ===${NC}\n"; }
+tui_header() { clear; echo -e "${BLUE}$M_TITLE${NC}\n"; }
 
 tui_input() {
     local p="$1"; local d="$2"; local v="$3"; local pass="$4"
@@ -700,6 +742,11 @@ inst_plat() {
     echo -e "${GREEN}[SUCCESS] 安装完成${NC}"; read -n 1 -s -r
 }
 
+change_lang() {
+    rm -f "$CONFIG_FILE"
+    exec "$0"
+}
+
 #=============================================================================
 # 6. Main
 #=============================================================================
@@ -712,29 +759,51 @@ main() {
         "monitor") traffic_daemon; exit 0 ;;
     esac
     
+    # 语言初始化
+    if [ ! -f "$CONFIG_FILE" ]; then
+        clear; echo -e "${BLUE}=== L4D2 Manager (L4M) ===${NC}\n"
+        echo "Please select language / 请选择语言:"
+        echo "1. English"
+        echo "2. 简体中文"
+        read -p "> " l
+        if [ "$l" == "2" ]; then echo "zh" > "$CONFIG_FILE"; else echo "en" > "$CONFIG_FILE"; fi
+        
+        # 尝试配置中文环境 (Root Only)
+        if [ "$l" == "2" ] && [ "$EUID" -eq 0 ]; then
+             if [ -f /etc/debian_version ]; then
+                 echo -e "${YELLOW}Configuring Chinese Locale...${NC}"
+                 apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq locales >/dev/null 2>&1
+                 sed -i 's/# zh_CN.UTF-8/zh_CN.UTF-8/' /etc/locale.gen 2>/dev/null
+                 locale-gen zh_CN.UTF-8 >/dev/null 2>&1
+                 export LANG=zh_CN.UTF-8
+             fi
+        fi
+    fi
+    load_i18n $(cat "$CONFIG_FILE")
+    
     if [[ "$INSTALL_TYPE" == "temp" ]]; then
         tui_header
-        echo -e "${YELLOW}欢迎使用 L4D2 Server Manager (L4M)${NC}"
-        echo -e "检测到您当前通过临时方式运行 (管道/临时目录)。"
+        echo -e "${YELLOW}$M_WELCOME${NC}"
+        echo -e "$M_TEMP_RUN"
         echo ""
-        echo -e "为了获得最佳体验，建议将管理器安装到系统："
-        echo -e "  • ${GREEN}数据持久化${NC}: 服务器配置和数据将安全保存，防误删。"
-        echo -e "  • ${GREEN}便捷访问${NC}: 安装后只需输入 ${CYAN}l4m${NC} 即可随时管理。"
-        echo -e "  • ${GREEN}高级功能${NC}: 支持开机自启、流量监控等特性。"
+        echo -e "$M_REC_INSTALL"
+        echo -e "$M_F_PERSIST"
+        echo -e "$M_F_ACCESS"
+        echo -e "$M_F_ADV"
         echo ""
-        read -p "是否立即安装到系统? (Y/n): " c
+        read -p "$M_ASK_INSTALL" c
         c=${c:-y}
         if [[ "$c" == "y" || "$c" == "Y" ]]; then install_smart; exit 0; fi
-        echo -e "${GREY}进入临时运行模式...${NC}"; sleep 1
+        echo -e "$M_TEMP_MODE"; sleep 1
     fi
     
     check_deps
     if [ ! -f "$DATA_FILE" ]; then touch "$DATA_FILE"; fi
     
     while true; do
-        tui_menu "L4M 主菜单" "部署新实例" "实例管理" "系统更新" "退出"
+        tui_menu "$M_MAIN_MENU" "$M_DEPLOY" "$M_MANAGE" "$M_UPDATE" "$M_LANG" "$M_EXIT"
         case $? in
-            0) deploy_wizard ;; 1) manage_menu ;; 2) self_update ;; 3) exit 0 ;;
+            0) deploy_wizard ;; 1) manage_menu ;; 2) self_update ;; 3) change_lang ;; 4) exit 0 ;;
         esac
     done
 }
