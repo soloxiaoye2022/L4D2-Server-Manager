@@ -96,13 +96,8 @@ function ensure_network_test() {
     fi
     network_test
     
-    if [ -n "${SELECTED_PROXY}" ]; then
-        STEAMCMD_URL="${SELECTED_PROXY}/${STEAMCMD_BASE_URI}"
-        STEAMCMD_BASE_URI="${SELECTED_PROXY}/${QUICK_UPDATE_BASE_PACKAGE}"
-    else
-        STEAMCMD_URL="${STEAMCMD_BASE_URI}"
-        STEAMCMD_BASE_URI="${QUICK_UPDATE_BASE_PACKAGE}"
-    fi
+    STEAMCMD_URL="${SELECTED_PROXY}/${STEAMCMD_URL}"
+    STEAMCMD_BASE_URI="${SELECTED_PROXY}/${STEAMCMD_BASE_URI}"
     NETWORK_TEST_DONE=true
 }
 
