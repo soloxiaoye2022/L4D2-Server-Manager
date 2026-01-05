@@ -1,5 +1,4 @@
 #!/bin/bash
-set -euo pipefail
 
 DEFAULT_DIR="test"
 DEFAULT_IP="0.0.0.0"
@@ -11,161 +10,11 @@ DEFAULT_TICK="100"
 START_PARAMETERS="-strictportbind -nobreakpad -noassert -ip ${DEFAULT_IP} -port ${DEFAULT_PORT} +map ${DEFAULT_MAP} +mp_gamemode ${DEFAULT_MODE} +servercfgfile ${DEFAULT_CFG} -tickrate ${DEFAULT_TICK}"
 
 STEAMCMD_URL="https://cdn.steamchina.eccdnx.com/client/installer/steamcmd_linux.tar.gz"
-STEAMCMD_URL_BACKUP1="https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
-STEAMCMD_URL_BACKUP2="https://media.steampowered.com/client/installer/steamcmd_linux.tar.gz"
-STEAMCMD_BASE_URI="https://github.com/apples1949/SteamCmdLinuxFile/releases/download/steamcmd-latest/steamcmd_linux.tar.gz"
-QUICK_UPDATE_BASE_PACKAGE="https://github.com/apples1949/SteamCmdLinuxFile/releases/download/steamcmd-latest/package.tar.gz"
-
-NETWORK_TEST_DONE=false
-
-function format_speed() {
-    local speed_bps=$1
-    if (( speed_bps > 1048576 )); then
-        local speed_mbs=$((speed_bps / 1048576))
-        echo "${speed_mbs} MB/s"
-    elif (( speed_bps > 1024 )); then
-        local speed_kbs=$((speed_bps / 1024))
-        echo "${speed_kbs} KB/s"
-    else
-        echo "${speed_bps} B/s"
-    fi
-}
-
-function test_steam_download_speed() {
-    local steam_urls=("$STEAMCMD_URL" "$STEAMCMD_URL_BACKUP1" "$STEAMCMD_URL_BACKUP2")
-    local steam_names=("Steam中国CDN" "AkamaiCDN" "Steam官方媒体")
-    local best_steam_url=""
-    local best_steam_speed=0
-    local timeout=5
-    
-    echo -e "\e[34m正在测试Steam下载源速度...\e[0m"
-    
-    for i in "${!steam_urls[@]}"; do
-        local url="${steam_urls[$i]}"
-        local name="${steam_names[$i]}"
-        echo -e "\e[34m测试 ${name}: \e[36m${url}\e[0m"
-        
-        local curl_output
-        curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time ${timeout} -o /dev/null -s -w "%{http_code}:%{speed_download}" "${url}" 2>/dev/null)
-        local status=$(echo "${curl_output}" | cut -d: -f1)
-        local download_speed=$(echo "${curl_output}" | cut -d: -f2 | cut -d. -f1)
-        
-        if [ "${status}" = "200" ] && [ -n "${download_speed}" ] && [ "${download_speed}" -gt 0 ]; then
-            local formatted_speed=$(format_speed "${download_speed}")
-            echo -e "\e[34m${name} 速度: \e[92m${formatted_speed}\e[0m"
-            
-            if [ "${download_speed}" -gt "${best_steam_speed}" ]; then
-                best_steam_speed=${download_speed}
-                best_steam_url=${url}
-            fi
-        else
-            echo -e "\e[33m${name} 连接失败或不可用\e[0m"
-        fi
-    done
-    
-    if [ -n "${best_steam_url}" ]; then
-        echo -e "\e[34m选择最优Steam下载源: \e[92m${best_steam_url}\e[0m"
-        STEAMCMD_URL="${best_steam_url}"
-    else
-        echo -e "\e[33m所有Steam下载源都不可用，将使用默认源\e[0m"
-    fi
-}
-
-function network_test() {
-    local timeout=10
-    local best_proxy=""
-    local best_speed=0
-    
-    # 代理列表
-    local proxy_arr=("https://ghfast.top" "https://git.yylx.win/" "https://gh-proxy.com" "https://ghfile.geekertao.top" "https://gh-proxy.net" "https://j.1win.ggff.net" "https://ghm.078465.xyz" "https://gitproxy.127731.xyz" "https://jiashu.1win.eu.org" "https://github.tbedu.top")
-    local check_url="https://raw.githubusercontent.com/soloxiaoye2022/server_install/refs/heads/main/server_install/linux/README.md"
-
-    echo -e "\e[34m开始执行 Github 代理测速...\e[0m"
-
-    # 测试直连
-    echo -e "\e[34m正在测试直连...\e[0m"
-    local curl_output
-    curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time $((timeout * 3)) -o /dev/null -s -w "%{http_code}:%{speed_download}" "${check_url}")
-    local status=$(echo "${curl_output}" | cut -d: -f1)
-    local download_speed=$(echo "${curl_output}" | cut -d: -f2 | cut -d. -f1)
-    local curl_exit_code=0
-    [ "${status}" != "000" ] && [ -n "${download_speed}" ] && curl_exit_code=0 || curl_exit_code=1
-
-    if [ "${curl_exit_code}" -eq 0 ] && [ "${status}" -eq 200 ]; then
-        local formatted_speed=$(format_speed "${download_speed}")
-        echo -e "\e[34m直连速度: \e[92m${formatted_speed}\e[0m"
-        best_speed=${download_speed}
-    else
-        echo -e "\e[33m直连失败或超时\e[0m"
-    fi
-
-    # 测试代理
-    for proxy in "${proxy_arr[@]}"; do
-
-        proxy=${proxy%/}
-        local test_url="${proxy}/${check_url}"
-        
-        curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time $((timeout * 3)) -o /dev/null -s -w "%{http_code}:%{speed_download}" "${test_url}")
-        status=$(echo "${curl_output}" | cut -d: -f1)
-        download_speed=$(echo "${curl_output}" | cut -d: -f2 | cut -d. -f1)
-        curl_exit_code=0
-        [ "${status}" != "000" ] && [ -n "${download_speed}" ] && curl_exit_code=0 || curl_exit_code=1
-
-        if [ "${curl_exit_code}" -eq 0 ] && [ "${status}" -eq 200 ]; then
-            local formatted_speed=$(format_speed "${download_speed}")
-            echo -e "\e[34m代理 \e[36m${proxy}\e[0m 速度: \e[92m${formatted_speed}\e[0m"
-            if (( download_speed > best_speed )); then
-                best_speed=${download_speed}
-                best_proxy=${proxy}
-            fi
-        fi
-    done
-
-    if [ -n "${best_proxy}" ]; then
-        echo -e "\e[34m选用最快代理: \e[92m${best_proxy}\e[0m"
-        SELECTED_PROXY="${best_proxy}"
-    else
-        if (( best_speed > 0 )); then
-            echo -e "\e[34m选用直连\e[0m"
-            SELECTED_PROXY=""
-        else
-            echo -e "\e[31m所有测速均失败，将使用默认代理\e[0m"
-            SELECTED_PROXY="https://gh-proxy.com"
-        fi
-    fi
-}
-
-function ensure_network_test() {
-    if [ "$NETWORK_TEST_DONE" = true ]; then
-        return
-    fi
-    network_test
-    
-    # 只为GitHub相关URL添加代理，Steam CDN使用直连
-    if [ -n "${SELECTED_PROXY}" ]; then
-        STEAMCMD_BASE_URI="${SELECTED_PROXY}/${STEAMCMD_BASE_URI}"
-        QUICK_UPDATE_BASE_PACKAGE="${SELECTED_PROXY}/${QUICK_UPDATE_BASE_PACKAGE}"
-        # Steam CDN使用直连，不通过代理，并测试选择最优源
-        echo -e "\e[34mSteam CDN将使用直连，GitHub资源使用代理: \e[92m${SELECTED_PROXY}\e[0m"
-    fi
-    
-    # 测试并选择最优Steam下载源
-    test_steam_download_speed
-    
-    NETWORK_TEST_DONE=true
-}
-
-
-DEFAULT_SH=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)
-
-case "${DEFAULT_SH:-}" in
-    /proc/*|/dev/*|/tmp/*|"")
-        DEFAULT_SH=$HOME
-        echo "[INFO] 检测到管道/source执行，自动切换到 $DEFAULT_SH"
-        ;;
-esac
+STEAMCMD_QUICK_URI="https://gh-proxy.com/github.com/apples1949/SteamCmdLinuxFile/releases/download/steamcmd-latest/steamcmd_linux.tar.gz"
+QUICK_UPDATE_PACKAGE="https://gh-proxy.com/github.com/apples1949/SteamCmdLinuxFile/releases/download/steamcmd-latest/package.tar.gz"
 
 PLUGIN_VERSION=(-s -d -n)
+DEFAULT_SH=$(cd $(dirname $0) && pwd)
 folder_path=${DEFAULT_SH}/steamcmd/${DEFAULT_DIR}/JS-MODS
 l4d2_menu=${DEFAULT_SH}/steamcmd/${DEFAULT_DIR}
 plugins_name=${DEFAULT_DIR}_plugins.txt
@@ -348,7 +197,7 @@ function install_dependencies() {
         wait_with_param "$SKIP_SCRIPT" 3 \
             "已跳过依赖换源脚本执行" \
             "正在执行依赖换源脚本..." \
-            "execute_dependency_script" || true
+            "execute_dependency_script"
     fi
 
     source "/etc/os-release"
@@ -383,7 +232,7 @@ function execute_quick_package_download() {
     rm -rf "${package_dir}"/*
     
     echo -e "\e[34m正在下载快速更新包...\e[0m"
-    if curl -m 300 -fSLo "${package_dir}/package.tar.gz" "${STEAMCMD_BASE_URI}"; then
+    if curl -m 300 -fSLo "${package_dir}/package.tar.gz" "${QUICK_UPDATE_PACKAGE}"; then
         echo -e "\e[34m快速更新包下载成功，正在解压...\e[0m"
         if tar -zxf "${package_dir}/package.tar.gz" -C "${package_dir}"; then
             echo -e "\e[92m快速更新包解压成功\e[0m"
@@ -408,11 +257,10 @@ function download_and_extract_quick_package() {
     wait_with_param "$SKIP_PACKAGE" 3 \
         "已跳过下载安装Steamcmd快速更新包" \
         "正在下载安装Steamcmd快速更新包..." \
-        "execute_quick_package_download" || true
+        "execute_quick_package_download"
 }
 
 function install_server() {
-    ensure_network_test
     trap 'rm -rf "${TMPDIR}"' EXIT
     TMPDIR=$(mktemp -d)
     if [ "${?}" -ne 0 ]; then
@@ -434,7 +282,7 @@ function install_server() {
         echo -e "\e[0m请检查\e[31m服务端目录\e[0m\e[0m是否还有未备份的文件\e[0m"
         echo -e "\e[0m第一次下载服务端可无视此提示\e[0m"
         
-        execute_delete_server_dir() {
+        function execute_delete_server_dir() {
             rm -rf "${DEFAULT_SH}/steamcmd/${DEFAULT_DIR}"
             steam_login
         }
@@ -458,21 +306,13 @@ function install_server() {
         fi
     fi
 
-    echo -e "\e[34msteamcmd\e[0m 正在使用Steam CDN直连: \e[92m${STEAMCMD_URL}\e[0m"
-    if ! curl -m 180 -fSLo "${TMPDIR}/steamcmd.tar.gz" "${STEAMCMD_URL}"; then
-        echo -e "\e[34msteamcmd\e[0m \e[31m主CDN下载失败，尝试备用源\e[0m"
-        echo -e "\e[34msteamcmd\e[0m 尝试备用源1: \e[92m${STEAMCMD_URL_BACKUP1}\e[0m"
-        if ! curl --connect-timeout 10 -m 60 -fSLo "${TMPDIR}/steamcmd.tar.gz" "${STEAMCMD_URL_BACKUP1}"; then
-            echo -e "\e[34msteamcmd\e[0m \e[31m备用源1下载失败\e[0m"
-            echo -e "\e[34msteamcmd\e[0m 尝试备用源2: \e[92m${STEAMCMD_URL_BACKUP2}\e[0m"
-            if ! curl --connect-timeout 10 -m 60 -fSLo "${TMPDIR}/steamcmd.tar.gz" "${STEAMCMD_URL_BACKUP2}"; then
-                echo -e "\e[34msteamcmd\e[0m \e[31m所有Steam下载源都失败，尝试GitHub代理源\e[0m"
-                echo -e "\e[34msteamcmd\e[0m 尝试GitHub代理: \e[92m${STEAMCMD_BASE_URI}\e[0m"
-                if ! curl -m 180 -fSLo "${TMPDIR}/steamcmd.tar.gz" "${STEAMCMD_BASE_URI}"; then
-                    echo -e "\e[34msteamcmd\e[0m \e[31m所有下载源都失败，请检查网络连接\e[0m"
-                    exit 1
-                fi
-            fi
+    echo -e "\e[34msteamcmd\e[0m 正在下载Github代理加速源 \e[92m${STEAMCMD_QUICK_URI}\e[0m"
+    if ! curl -m 180 -fSLo "${TMPDIR}/steamcmd.tar.gz" "${STEAMCMD_QUICK_URI}"; then
+        echo -e "\e[34msteamcmd\e[0m \e[31mGithub代理加速源(${STEAMCMD_QUICK_URI})下载失败 \e[0m"
+        echo -e "\e[34msteamcmd\e[0m 尝试下载官方源\e[92m${STEAMCMD_URL}\e[0m"
+        if ! curl --connect-timeout 10 -m 60 -fSLo "${TMPDIR}/steamcmd.tar.gz" "${STEAMCMD_URL}"; then
+            echo -e "\e[34msteamcmd\e[0m \e[31m官方源\e[92m${STEAMCMD_URL}\e[0m下载失败\e[0m"
+            exit 1
         fi
     fi
 
@@ -525,8 +365,7 @@ function steam_login() {
     echo -e "\e[92m1\e[0m.\e[34m选择匿名登录\e[0m"
     echo -e "\e[92m2\e[0m.\e[34m选择账号登录\e[0m\e[32m（登录的账号必须已购买求生之路2）\e[0m"
     echo -e "\e[33m3秒内未输入将自动选择匿名登录...\e[0m"
-    echo -n "您的选择是: "
-    read -t 3 login_number
+    read -t 3 -p "您的选择是: " login_number
     if [ $? -ne 0 ] || [ -z "$login_number" ]; then
         echo -e "\n\e[32m超时，自动选择匿名登录\e[0m"
         first_anonymous_update_server
@@ -620,7 +459,6 @@ function first_account_update_server() {
 }
 
 function update_server() {
-    ensure_network_test
     stop_server
 
     download_and_extract_quick_package
@@ -905,14 +743,14 @@ function main() {
                     shift
                 fi
                 ;;
-            --skip-update|-su)
+            --skip-updata|-su)
                 if [ -n "$2" ] && [ -n "$3" ]; then
                     STEAM_ACCOUNT="$2"
                     STEAM_PASSWORD="$3"
                     SKIP_UPDATE="account"
                     shift 3
                 else
-                    echo -e "\e[33m警告：--skip-update 参数需要 Steam 账户和密码，使用默认行为\e[0m"
+                    echo -e "\e[33m警告：--skip-updata 参数需要 Steam 账户和密码，使用默认行为\e[0m"
                     shift
                 fi
                 ;;
