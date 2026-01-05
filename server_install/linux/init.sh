@@ -798,7 +798,7 @@ subfolders=()
 subfolde=()
 
 if [ -d "$folder_path" ]; then
-    for subfolder in "$folder_path"/*/; do
+    for subfolder in "${folder_path}"/*/; do
         if [ -d "$subfolder" ]; then
             subfolders+=("$subfolder")
         fi
