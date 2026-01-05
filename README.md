@@ -23,7 +23,7 @@ bash <(curl -s -L https://gh-proxy.com/https://raw.githubusercontent.com/soloxia
 
 脚本会自动检测您的环境：
 - **Root 用户**: 安装到 `/usr/local/l4d2_manager`
-- **普通用户/Termux**: 安装到 `~/.l4d2_manager`
+- **普通用户**: 安装到 `~/.l4d2_manager`
 
 ## 📖 使用指南
 

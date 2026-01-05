@@ -23,7 +23,7 @@ bash <(curl -s -L https://gh-proxy.com/https://raw.githubusercontent.com/soloxia
 
 The script automatically detects your environment:
 - **Root User**: Installs to `/usr/local/l4d2_manager`
-- **Non-Root/Termux**: Installs to `~/.l4d2_manager`
+- **Non-Root**: Installs to `~/.l4d2_manager`
 
 ## 📖 Usage Guide
 
