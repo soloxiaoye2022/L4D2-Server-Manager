@@ -11,6 +11,8 @@ DEFAULT_TICK="100"
 START_PARAMETERS="-strictportbind -nobreakpad -noassert -ip ${DEFAULT_IP} -port ${DEFAULT_PORT} +map ${DEFAULT_MAP} +mp_gamemode ${DEFAULT_MODE} +servercfgfile ${DEFAULT_CFG} -tickrate ${DEFAULT_TICK}"
 
 STEAMCMD_URL="https://cdn.steamchina.eccdnx.com/client/installer/steamcmd_linux.tar.gz"
+STEAMCMD_URL_BACKUP1="https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
+STEAMCMD_URL_BACKUP2="https://media.steampowered.com/client/installer/steamcmd_linux.tar.gz"
 STEAMCMD_BASE_URI="https://github.com/apples1949/SteamCmdLinuxFile/releases/download/steamcmd-latest/steamcmd_linux.tar.gz"
 QUICK_UPDATE_BASE_PACKAGE="https://github.com/apples1949/SteamCmdLinuxFile/releases/download/steamcmd-latest/package.tar.gz"
 
@@ -26,6 +28,46 @@ function format_speed() {
         echo "${speed_kbs} KB/s"
     else
         echo "${speed_bps} B/s"
+    fi
+}
+
+function test_steam_download_speed() {
+    local steam_urls=("$STEAMCMD_URL" "$STEAMCMD_URL_BACKUP1" "$STEAMCMD_URL_BACKUP2")
+    local steam_names=("Steam中国CDN" "AkamaiCDN" "Steam官方媒体")
+    local best_steam_url=""
+    local best_steam_speed=0
+    local timeout=5
+    
+    echo -e "\e[34m正在测试Steam下载源速度...\e[0m"
+    
+    for i in "${!steam_urls[@]}"; do
+        local url="${steam_urls[$i]}"
+        local name="${steam_names[$i]}"
+        echo -e "\e[34m测试 ${name}: \e[36m${url}\e[0m"
+        
+        local curl_output
+        curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time ${timeout} -o /dev/null -s -w "%{http_code}:%{speed_download}" "${url}" 2>/dev/null)
+        local status=$(echo "${curl_output}" | cut -d: -f1)
+        local download_speed=$(echo "${curl_output}" | cut -d: -f2 | cut -d. -f1)
+        
+        if [ "${status}" = "200" ] && [ -n "${download_speed}" ] && [ "${download_speed}" -gt 0 ]; then
+            local formatted_speed=$(format_speed "${download_speed}")
+            echo -e "\e[34m${name} 速度: \e[92m${formatted_speed}\e[0m"
+            
+            if [ "${download_speed}" -gt "${best_steam_speed}" ]; then
+                best_steam_speed=${download_speed}
+                best_steam_url=${url}
+            fi
+        else
+            echo -e "\e[33m${name} 连接失败或不可用\e[0m"
+        fi
+    done
+    
+    if [ -n "${best_steam_url}" ]; then
+        echo -e "\e[34m选择最优Steam下载源: \e[92m${best_steam_url}\e[0m"
+        STEAMCMD_URL="${best_steam_url}"
+    else
+        echo -e "\e[33m所有Steam下载源都不可用，将使用默认源\e[0m"
     fi
 }
 
@@ -99,10 +141,17 @@ function ensure_network_test() {
     fi
     network_test
     
+    # 只为GitHub相关URL添加代理，Steam CDN使用直连
     if [ -n "${SELECTED_PROXY}" ]; then
-        STEAMCMD_URL="${SELECTED_PROXY}/${STEAMCMD_URL}"
         STEAMCMD_BASE_URI="${SELECTED_PROXY}/${STEAMCMD_BASE_URI}"
+        QUICK_UPDATE_BASE_PACKAGE="${SELECTED_PROXY}/${QUICK_UPDATE_BASE_PACKAGE}"
+        # Steam CDN使用直连，不通过代理，并测试选择最优源
+        echo -e "\e[34mSteam CDN将使用直连，GitHub资源使用代理: \e[92m${SELECTED_PROXY}\e[0m"
     fi
+    
+    # 测试并选择最优Steam下载源
+    test_steam_download_speed
+    
     NETWORK_TEST_DONE=true
 }
 
@@ -299,7 +348,7 @@ function install_dependencies() {
         wait_with_param "$SKIP_SCRIPT" 3 \
             "已跳过依赖换源脚本执行" \
             "正在执行依赖换源脚本..." \
-            "execute_dependency_script"
+            "execute_dependency_script" || true
     fi
 
     source "/etc/os-release"
@@ -359,7 +408,7 @@ function download_and_extract_quick_package() {
     wait_with_param "$SKIP_PACKAGE" 3 \
         "已跳过下载安装Steamcmd快速更新包" \
         "正在下载安装Steamcmd快速更新包..." \
-        "execute_quick_package_download"
+        "execute_quick_package_download" || true
 }
 
 function install_server() {
@@ -409,13 +458,21 @@ function install_server() {
         fi
     fi
 
-    echo -e "\e[34msteamcmd\e[0m 正在使用Github代理加速源 "${SELECTED_PROXY}" \e[92m${STEAMCMD_URL}\e[0m"
+    echo -e "\e[34msteamcmd\e[0m 正在使用Steam CDN直连: \e[92m${STEAMCMD_URL}\e[0m"
     if ! curl -m 180 -fSLo "${TMPDIR}/steamcmd.tar.gz" "${STEAMCMD_URL}"; then
-        echo -e "\e[34msteamcmd\e[0m \e[31mGithub代理加速源(${STEAMCMD_URL})下载失败 \e[0m"
-        echo -e "\e[34msteamcmd\e[0m 尝试下载官方源\e[92m${STEAMCMD_URL}\e[0m"
-        if ! curl --connect-timeout 10 -m 60 -fSLo "${TMPDIR}/steamcmd.tar.gz" "${STEAMCMD_URL}"; then
-            echo -e "\e[34msteamcmd\e[0m \e[31m官方源\e[92m${STEAMCMD_URL}\e[0m下载失败\e[0m"
-            exit 1
+        echo -e "\e[34msteamcmd\e[0m \e[31m主CDN下载失败，尝试备用源\e[0m"
+        echo -e "\e[34msteamcmd\e[0m 尝试备用源1: \e[92m${STEAMCMD_URL_BACKUP1}\e[0m"
+        if ! curl --connect-timeout 10 -m 60 -fSLo "${TMPDIR}/steamcmd.tar.gz" "${STEAMCMD_URL_BACKUP1}"; then
+            echo -e "\e[34msteamcmd\e[0m \e[31m备用源1下载失败\e[0m"
+            echo -e "\e[34msteamcmd\e[0m 尝试备用源2: \e[92m${STEAMCMD_URL_BACKUP2}\e[0m"
+            if ! curl --connect-timeout 10 -m 60 -fSLo "${TMPDIR}/steamcmd.tar.gz" "${STEAMCMD_URL_BACKUP2}"; then
+                echo -e "\e[34msteamcmd\e[0m \e[31m所有Steam下载源都失败，尝试GitHub代理源\e[0m"
+                echo -e "\e[34msteamcmd\e[0m 尝试GitHub代理: \e[92m${STEAMCMD_BASE_URI}\e[0m"
+                if ! curl -m 180 -fSLo "${TMPDIR}/steamcmd.tar.gz" "${STEAMCMD_BASE_URI}"; then
+                    echo -e "\e[34msteamcmd\e[0m \e[31m所有下载源都失败，请检查网络连接\e[0m"
+                    exit 1
+                fi
+            fi
         fi
     fi
 
