@@ -52,7 +52,10 @@ else
 fi
 
 DATA_FILE="${FINAL_ROOT}/servers.dat"
-JS_MODS_DIR="${FINAL_ROOT}/js-mods"
+PLUGIN_CONFIG="${FINAL_ROOT}/plugin_config.dat"
+if [ -f "$PLUGIN_CONFIG" ]; then JS_MODS_DIR=$(cat "$PLUGIN_CONFIG"); else
+    if [ "$EUID" -eq 0 ]; then JS_MODS_DIR="/root/L4D2_Plugins"; else JS_MODS_DIR="$HOME/L4D2_Plugins"; fi
+fi
 STEAMCMD_DIR="${FINAL_ROOT}/steamcmd_common"
 TRAFFIC_DIR="${FINAL_ROOT}/traffic_logs"
 BACKUP_DIR="${FINAL_ROOT}/backups"
@@ -596,28 +599,41 @@ plugins_menu() {
     local p="$1"
     if [ ! -d "$p/left4dead2" ]; then echo -e "${RED}目录错${NC}"; read -n 1 -s -r; return; fi
     while true; do
-        tui_menu "插件管理" "安装插件" "安装平台(SM/MM)" "返回"
+        tui_menu "插件管理" "安装插件" "安装平台(SM/MM)" "设置插件库目录" "返回"
         case $? in
-            0) inst_plug "$p" ;; 1) inst_plat "$p" ;; 2) return ;;
+            0) inst_plug "$p" ;; 1) inst_plat "$p" ;; 2) set_plugin_repo ;; 3) return ;;
         esac
     done
 }
 
+set_plugin_repo() {
+    tui_header; echo -e "${CYAN}当前插件库:${NC} $JS_MODS_DIR"
+    echo -e "${YELLOW}请输入新路径 (留空取消):${NC}"
+    read -e -i "$JS_MODS_DIR" new
+    if [ -n "$new" ]; then
+        JS_MODS_DIR="$new"; echo "$new" > "$PLUGIN_CONFIG"
+        mkdir -p "$new"; echo -e "${GREEN}已保存${NC}"
+    fi
+    sleep 1
+}
+
 inst_plug() {
     local t="$1/left4dead2"
-    if [ ! -d "$JS_MODS_DIR" ]; then
-        local f=$(find "$FINAL_ROOT" -maxdepth 4 -type d -name "JS-MODS" -print -quit)
-        if [ -n "$f" ]; then JS_MODS_DIR="$f"; fi
-    fi
-    if [ ! -d "$JS_MODS_DIR" ]; then echo -e "${RED}缺 JS-MODS${NC}"; read -n 1 -s -r; return; fi
+    if [ ! -d "$JS_MODS_DIR" ]; then echo -e "${RED}插件库不存在: $JS_MODS_DIR${NC}"; read -n 1 -s -r; return; fi
+    
+    local rec="$1/.installed_plugins"; if [ ! -f "$rec" ]; then touch "$rec"; fi
     
     local ps=(); local d=()
     while IFS= read -r -d '' dir; do
-        local n=$(basename "$dir"); ps+=("$n")
-        if [ -d "$t/addons/$n" ]; then d+=("$n ${GREEN}[已装]${NC}"); else d+=("$n"); fi
+        local n=$(basename "$dir")
+        if grep -qFx "$n" "$rec"; then
+            ps+=("$n"); d+=("$n ${GREY}[已装]${NC}")
+        else
+            ps+=("$n"); d+=("$n")
+        fi
     done < <(find "$JS_MODS_DIR" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
     
-    if [ ${#ps[@]} -eq 0 ]; then echo "空"; read -n 1 -s -r; return; fi
+    if [ ${#ps[@]} -eq 0 ]; then echo "插件库为空"; read -n 1 -s -r; return; fi
     
     local sel=(); for ((j=0;j<${#ps[@]};j++)); do sel[j]=0; done
     local cur=0; local start=0; local size=15; local tot=${#ps[@]}
@@ -643,7 +659,11 @@ inst_plug() {
     
     local c=0
     for ((j=0;j<tot;j++)); do
-        if [ "${sel[j]}" -eq 1 ]; then cp -rf "${JS_MODS_DIR}/${ps[j]}/"* "$t/" 2>/dev/null; ((c++)); fi
+        if [ "${sel[j]}" -eq 1 ]; then 
+            cp -rf "${JS_MODS_DIR}/${ps[j]}/"* "$t/" 2>/dev/null
+            if ! grep -qFx "${ps[j]}" "$rec"; then echo "${ps[j]}" >> "$rec"; fi
+            ((c++))
+        fi
     done
     echo -e "${GREEN}完成 $c${NC}"; read -n 1 -s -r
 }
