@@ -388,22 +388,60 @@ control_panel() {
         local st=$(get_status "$n")
         local a_txt="开启自启"; if [ "$auto" == "true" ]; then a_txt="关闭自启"; fi
         
-        tui_menu "管理: $n [$st]" "启动" "停止" "重启" "控制台" "日志" "流量统计" "配置启动参数" "插件管理" "$a_txt" "备份服务端" "返回"
+        tui_menu "管理: $n [$st]" "启动" "停止" "重启" "更新服务端" "控制台" "日志" "流量统计" "配置启动参数" "插件管理" "$a_txt" "备份服务端" "返回"
         case $? in
             0) start_srv "$n" "$p" "$port" ;;
             1) stop_srv "$n" ;;
             2) stop_srv "$n"; sleep 1; start_srv "$n" "$p" "$port" ;;
-            3) attach_con "$n" ;;
-            4) view_log "$p" ;;
-            5) view_traffic "$n" "$port" ;;
-            6) edit_args "$p" ;;
-            7) plugins_menu "$p" ;;
-            8) toggle_auto "$n" "$line"; break ;; 
-            9) backup_srv "$n" "$p" ;;
-            10) return ;;
+            3) update_srv "$n" "$p" ;;
+            4) attach_con "$n" ;;
+            5) view_log "$p" ;;
+            6) view_traffic "$n" "$port" ;;
+            7) edit_args "$p" ;;
+            8) plugins_menu "$p" ;;
+            9) toggle_auto "$n" "$line"; break ;; 
+            10) backup_srv "$n" "$p" ;;
+            11) return ;;
         esac
     done
     control_panel "$n" # reload
+}
+
+update_srv() {
+    local n="$1"; local p="$2"
+    if [ "$(get_status "$n")" == "RUNNING" ]; then
+        echo -e "${YELLOW}更新前需停止服务器${NC}"
+        read -p "立即停止并更新? (y/n): " c
+        if [[ "$c" != "y" && "$c" != "Y" ]]; then return; fi
+        stop_srv "$n"
+    fi
+    
+    local script="${p}/update.txt"
+    if [ ! -f "$script" ]; then
+        echo -e "${RED}未找到 update.txt${NC}"
+        echo -e "${YELLOW}是否以匿名模式重建更新脚本? (y/n)${NC}"
+        read -p "> " c
+        if [[ "$c" == "y" || "$c" == "Y" ]]; then
+            echo "force_install_dir \"$p\"" > "$script"
+            echo "login anonymous" >> "$script"
+            echo "@sSteamCmdForcePlatformType linux" >> "$script"
+            echo "app_info_update 1" >> "$script"
+            echo "app_update $DEFAULT_APPID" >> "$script"
+            echo "@sSteamCmdForcePlatformType windows" >> "$script"
+            echo "app_info_update 1" >> "$script"
+            echo "app_update $DEFAULT_APPID" >> "$script"
+            echo "@sSteamCmdForcePlatformType linux" >> "$script"
+            echo "app_info_update 1" >> "$script"
+            echo "app_update $DEFAULT_APPID validate" >> "$script"
+            echo "quit" >> "$script"
+        else
+            return
+        fi
+    fi
+    
+    echo -e "${CYAN}正在调用 SteamCMD 更新...${NC}"
+    "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$script"
+    echo -e "${GREEN}完成${NC}"; read -n 1 -s -r
 }
 
 start_srv() {
