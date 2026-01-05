@@ -72,13 +72,13 @@ function test_steam_download_speed() {
 }
 
 function network_test() {
-    local timeout=10
+    local timeout=5                    # 减少超时时间到5秒
     local best_proxy=""
     local best_speed=0
     
-    # 代理列表
-    local proxy_arr=("https://ghfast.top" "https://git.yylx.win/" "https://gh-proxy.com" "https://ghfile.geekertao.top" "https://gh-proxy.net" "https://j.1win.ggff.net" "https://ghm.078465.xyz" "https://gitproxy.127731.xyz" "https://jiashu.1win.eu.org" "https://github.tbedu.top")
-    local check_url="https://raw.githubusercontent.com/soloxiaoye2022/server_install/refs/heads/main/server_install/linux/README.md"
+    # 优化代理列表 - 保留速度较好的代理
+    local proxy_arr=("https://gh-proxy.com" "https://ghm.078465.xyz" "https://ghfast.top" "https://github.tbedu.top")
+    local check_url="https://raw.githubusercontent.com/soloxiaoye2022/server_install/main/README.md"  # 使用更小的文件
 
     echo -e "\e[34m开始执行 Github 代理测速...\e[0m"
 
@@ -99,24 +99,28 @@ function network_test() {
         echo -e "\e[33m直连失败或超时\e[0m"
     fi
 
-    # 测试代理
+    # 测试代理 - 添加快速预检机制
+    echo -e "\e[34m正在测试代理可用性...\e[0m"
     for proxy in "${proxy_arr[@]}"; do
-
         proxy=${proxy%/}
         local test_url="${proxy}/${check_url}"
         
-        curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time $((timeout * 3)) -o /dev/null -s -w "%{http_code}:%{speed_download}" "${test_url}")
-        status=$(echo "${curl_output}" | cut -d: -f1)
-        download_speed=$(echo "${curl_output}" | cut -d: -f2 | cut -d. -f1)
-        curl_exit_code=0
-        [ "${status}" != "000" ] && [ -n "${download_speed}" ] && curl_exit_code=0 || curl_exit_code=1
+        # 先快速测试连接（2秒超时）
+        if curl -k -L --connect-timeout 2 --max-time 2 -o /dev/null -s -w "%{http_code}" "${test_url}" | grep -q "200"; then
+            # 连接成功，进行完整测速
+            curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time $((timeout * 2)) -o /dev/null -s -w "%{http_code}:%{speed_download}" "${test_url}")
+            status=$(echo "${curl_output}" | cut -d: -f1)
+            download_speed=$(echo "${curl_output}" | cut -d: -f2 | cut -d. -f1)
+            curl_exit_code=0
+            [ "${status}" != "000" ] && [ -n "${download_speed}" ] && curl_exit_code=0 || curl_exit_code=1
 
-        if [ "${curl_exit_code}" -eq 0 ] && [ "${status}" -eq 200 ]; then
-            local formatted_speed=$(format_speed "${download_speed}")
-            echo -e "\e[34m代理 \e[36m${proxy}\e[0m 速度: \e[92m${formatted_speed}\e[0m"
-            if (( download_speed > best_speed )); then
-                best_speed=${download_speed}
-                best_proxy=${proxy}
+            if [ "${curl_exit_code}" -eq 0 ] && [ "${status}" -eq 200 ] && [ "${download_speed}" -gt 0 ]; then
+                local formatted_speed=$(format_speed "${download_speed}")
+                echo -e "\e[34m代理 \e[36m${proxy}\e[0m 速度: \e[92m${formatted_speed}\e[0m"
+                if (( download_speed > best_speed )); then
+                    best_speed=${download_speed}
+                    best_proxy=${proxy}
+                fi
             fi
         fi
     done
@@ -129,9 +133,14 @@ function network_test() {
             echo -e "\e[34m选用直连\e[0m"
             SELECTED_PROXY=""
         else
-            echo -e "\e[31m所有测速均失败，将使用默认代理\e[0m"
+            echo -e "\e[33m代理测速较慢或失败，将使用默认代理并继续\e[0m"
             SELECTED_PROXY="https://gh-proxy.com"
         fi
+    fi
+    
+    # 如果测速过程较慢，给出提示
+    if [ -z "${best_proxy}" ] && [ -z "${SELECTED_PROXY}" ]; then
+        echo -e "\e[33m网络连接较慢，后续下载可能需要更长时间\e[0m"
     fi
 }
 
@@ -379,6 +388,12 @@ function environment() {
 function execute_quick_package_download() {
     local package_dir="${DEFAULT_SH}/steamcmd/package"
     
+    # 确保目录存在
+    if [ ! -d "${package_dir}" ]; then
+        echo -e "\e[34m创建package目录...\e[0m"
+        mkdir -p "${package_dir}"
+    fi
+    
     echo -e "\e[34m正在清除package目录...\e[0m"
     rm -rf "${package_dir}"/*
     
@@ -525,9 +540,12 @@ function steam_login() {
     echo -e "\e[92m1\e[0m.\e[34m选择匿名登录\e[0m"
     echo -e "\e[92m2\e[0m.\e[34m选择账号登录\e[0m\e[32m（登录的账号必须已购买求生之路2）\e[0m"
     echo -e "\e[33m3秒内未输入将自动选择匿名登录...\e[0m"
-    echo -n "您的选择是: "
-    read -t 3 login_number
-    if [ $? -ne 0 ] || [ -z "$login_number" ]; then
+    
+    # 使用更安全的超时输入方式
+    read -t 3 -p "您的选择是: " login_number 2>/dev/null
+    local read_status=$?
+    
+    if [ $read_status -ne 0 ] || [ -z "$login_number" ]; then
         echo -e "\n\e[32m超时，自动选择匿名登录\e[0m"
         first_anonymous_update_server
         return
