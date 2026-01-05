@@ -175,6 +175,7 @@ load_i18n() {
         M_LOCAL_PKG="${CYAN}发现本地预置包，正在安装...${NC}"
         M_CONN_OFFICIAL="${CYAN}正在连接官网(sourcemod.net)获取最新版本...${NC}"
         M_GET_LINK_FAIL="${RED}[FAILED] 无法获取下载链接，请检查网络或手动下载。${NC}"
+        M_FOUND_EXISTING="检测到系统已安装 L4M，正在启动..."
     else
         M_TITLE="=== L4D2 Manager (L4M) ==="
         M_WELCOME="Welcome to L4D2 Server Manager (L4M)"
@@ -286,6 +287,7 @@ load_i18n() {
         M_LOCAL_PKG="${CYAN}Found local package, installing...${NC}"
         M_CONN_OFFICIAL="${CYAN}Connecting to sourcemod.net...${NC}"
         M_GET_LINK_FAIL="${RED}[FAILED] Cannot get link, check network.${NC}"
+        M_FOUND_EXISTING="Detected existing L4M installation, launching..."
     fi
 }
 
@@ -977,6 +979,20 @@ main() {
     load_i18n $(cat "$CONFIG_FILE")
     
     if [[ "$INSTALL_TYPE" == "temp" ]]; then
+        # 优先检测现有安装
+        local exist_path=""
+        if [ "$EUID" -eq 0 ] && [ -f "$SYSTEM_INSTALL_DIR/l4m" ]; then
+            exist_path="$SYSTEM_INSTALL_DIR/l4m"
+        elif [ -f "$USER_INSTALL_DIR/l4m" ]; then
+            exist_path="$USER_INSTALL_DIR/l4m"
+        fi
+        
+        if [ -n "$exist_path" ]; then
+            echo -e "${GREEN}$M_FOUND_EXISTING${NC}"
+            sleep 1
+            exec "$exist_path" "$@"
+        fi
+
         tui_header
         echo -e "${YELLOW}$M_WELCOME${NC}"
         echo -e "$M_TEMP_RUN"
