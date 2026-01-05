@@ -77,86 +77,79 @@ function test_steam_download_speed() {
 }
 
 function network_test() {
-    local timeout=5                    # 减少超时时间到5秒
+    local timeout=10
+    local check_url="https://raw.githubusercontent.com/soloxiaoye2022/server_install/main/README.md"
+    local proxy_arr=("https://ghfast.top" "https://git.yylx.win/" "https://gh-proxy.com" "https://ghfile.geekertao.top" "https://gh-proxy.net" "https://j.1win.ggff.net" "https://ghm.078465.xyz" "https://gitproxy.127731.xyz" "https://jiashu.1win.eu.org" "https://github.tbedu.top")
+
     local best_proxy=""
     local best_speed=0
-    
-    # 优化代理列表 - 保留速度较好的代理
-    local proxy_arr=("https://gh-proxy.com" "https://ghm.078465.xyz" "https://ghfast.top" "https://github.tbedu.top")
-    # 使用 Raw 文件进行测速，避免 zip 下载限制或重定向问题
-    local check_url="https://raw.githubusercontent.com/soloxiaoye2022/server_install/main/README.md"
 
     echo -e "\e[34m开始执行 Github 代理测速...\e[0m"
 
-    # 测试直连
-    echo -e "\e[34m正在测试直连...\e[0m"
+    echo -e "\e[34m测速: 直连...\e[0m"
     local curl_output
-    # 增加连接超时到10秒，总超时15秒
-    curl_output=$(curl -k -L --connect-timeout 10 --max-time 15 -o /dev/null -s -w "%{http_code}:%{speed_download}" "${check_url}") || curl_output="000:0"
+    curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time $((timeout * 2)) -o /dev/null -s -w "%{http_code}:%{exitcode}:%{speed_download}" "${check_url}" 2>/dev/null || echo "000:1:0")
     local status=$(echo "${curl_output}" | cut -d: -f1)
-    local download_speed=$(echo "${curl_output}" | cut -d: -f2 | cut -d. -f1)
-    local curl_exit_code=0
-    [ "${status}" != "000" ] && [ -n "${download_speed}" ] && curl_exit_code=0 || curl_exit_code=1
+    local curl_exit_code=$(echo "${curl_output}" | cut -d: -f2)
+    local download_speed=$(echo "${curl_output}" | cut -d: -f3 | cut -d. -f1)
 
-    if [ "${curl_exit_code}" -eq 0 ] && [ "${status}" -eq 200 ]; then
-        local formatted_speed=$(format_speed "${download_speed}")
+    if [ "${curl_exit_code}" -eq 0 ] && [ "${status}" -eq 200 ] && [ -n "${download_speed}" ] && [ "${download_speed}" -gt 0 ]; then
+        local formatted_speed
+        formatted_speed=$(format_speed "${download_speed}")
         echo -e "\e[34m直连速度: \e[92m${formatted_speed}\e[0m"
         best_speed=${download_speed}
+        best_proxy=""
     else
-        echo -e "\e[33m直连失败或超时 (状态: ${status})\e[0m"
+        echo -e "\e[33m直连测试失败或超时\e[0m"
     fi
 
-    # 测试代理 - 直接测速
     echo -e "\e[34m正在测试代理可用性...\e[0m"
-    
-    for proxy in "${proxy_arr[@]}"; do
-        proxy=${proxy%/}
-        local test_url="${proxy}/${check_url}"
-        
-        echo -e "\e[34m测试代理: \e[36m${proxy}\e[0m"
-        
-        # 下载到临时文件进行验证
-        local temp_test_file="/tmp/proxy_test_$$.tmp"
-        curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time ${timeout} -o "${temp_test_file}" -s -w "%{http_code}:%{speed_download}" "${test_url}" 2>/dev/null) || curl_output="000:0"
+    for proxy_candidate in "${proxy_arr[@]}"; do
+        proxy_candidate=${proxy_candidate%/}
+        local test_url="${proxy_candidate}/${check_url}"
+
+        echo -e "\e[34m测试代理: \e[36m${proxy_candidate}\e[0m"
+
+        curl_output=$(curl -k -L --connect-timeout ${timeout} --max-time $((timeout * 2)) -o /dev/null -s -w "%{http_code}:%{exitcode}:%{speed_download}" "${test_url}" 2>/dev/null || echo "000:1:0")
         status=$(echo "${curl_output}" | cut -d: -f1)
-        download_speed=$(echo "${curl_output}" | cut -d: -f2 | cut -d. -f1)
-        
-        if [ "${status}" = "200" ] && [ -n "${download_speed}" ] && [ "${download_speed}" -gt 0 ]; then
-            # 检查文件内容，确保不是HTML页面
-            if [ -f "${temp_test_file}" ] && ! head -c 100 "${temp_test_file}" | grep -qi "html\|DOCTYPE\|<!DOCTYPE"; then
-                local formatted_speed=$(format_speed "${download_speed}")
-                echo -e "\e[34m  速度: \e[92m${formatted_speed}\e[0m"
-                if (( download_speed > best_speed )); then
-                    best_speed=${download_speed}
-                    best_proxy=${proxy}
-                fi
-            else
-                echo -e "\e[33m  代理返回HTML页面，不可用\e[0m"
+        curl_exit_code=$(echo "${curl_output}" | cut -d: -f2)
+        download_speed=$(echo "${curl_output}" | cut -d: -f3 | cut -d. -f1)
+
+        if [ "${curl_exit_code}" -ne 0 ]; then
+            echo -e "\e[33m  代理不可用，curl退出码: ${curl_exit_code}\e[0m"
+            continue
+        fi
+
+        if [ "${status}" -eq 200 ] && [ -n "${download_speed}" ] && [ "${download_speed}" -gt 0 ]; then
+            local formatted_speed
+            formatted_speed=$(format_speed "${download_speed}")
+            echo -e "\e[34m  速度: \e[92m${formatted_speed}\e[0m"
+
+            if [ "${download_speed}" -gt "${best_speed}" ]; then
+                best_speed=${download_speed}
+                best_proxy=${proxy_candidate}
             fi
         else
             echo -e "\e[33m  代理不可用 (状态: ${status})\e[0m"
         fi
-        
-        # 清理临时文件
-        rm -f "${temp_test_file}"
     done
 
-    if [ -n "${best_proxy}" ]; then
-        echo -e "\e[34m选用最快代理: \e[92m${best_proxy}\e[0m"
-        SELECTED_PROXY="${best_proxy}"
-    else
-        if (( best_speed > 0 )); then
-            echo -e "\e[34m选用直连\e[0m"
-            SELECTED_PROXY=""
+    if [ "${best_speed}" -gt 0 ]; then
+        if [ -n "${best_proxy}" ]; then
+            SELECTED_PROXY="${best_proxy}"
+            local formatted_best_speed
+            formatted_best_speed=$(format_speed "${best_speed}")
+            echo -e "\e[34m测试完成, 将使用最快的 Github 代理: \e[92m${SELECTED_PROXY}\e[0m"
+            echo -e "\e[34m最快代理速度: \e[92m${formatted_best_speed}\e[0m"
         else
-            echo -e "\e[33m代理测速较慢或失败，将使用默认代理并继续\e[0m"
-            SELECTED_PROXY="https://gh-proxy.com"
+            SELECTED_PROXY=""
+            local formatted_best_speed
+            formatted_best_speed=$(format_speed "${best_speed}")
+            echo -e "\e[34m测试完成, 直连速度最快, 将不使用代理 (速度: \e[92m${formatted_best_speed}\e[0m)"
         fi
-    fi
-    
-    # 如果测速过程较慢，给出提示
-    if [ -z "${best_proxy}" ] && [ -z "${SELECTED_PROXY}" ]; then
-        echo -e "\e[33m网络连接较慢，后续下载可能需要更长时间\e[0m"
+    else
+        SELECTED_PROXY=""
+        echo -e "\e[33m警告: 无法找到可用的 Github 代理且直连失败, 将使用直连继续, 下载速度可能较慢\e[0m"
     fi
 }
 
@@ -164,29 +157,24 @@ function ensure_network_test() {
     if [ "$NETWORK_TEST_DONE" = true ]; then
         return
     fi
+
     network_test
-    
-    # 只为GitHub相关URL添加代理，Steam CDN使用直连，且只构建一次
-    if [ -n "${SELECTED_PROXY}" ] && [ "$PROXY_URL_BUILT" = false ]; then
-        # 大多数GitHub加速代理都支持直接拼接完整URL
-        # 格式: https://proxy.com/https://github.com/user/repo...
-        
-        # 强制清除可能存在的代理前缀，防止双重代理
-        # 先恢复到原始定义的URL（硬编码，确保安全）
-        local raw_steam_url="https://github.com/apples1949/SteamCmdLinuxFile/releases/download/steamcmd-latest/steamcmd_linux.tar.gz"
-        local raw_package_url="https://github.com/apples1949/SteamCmdLinuxFile/releases/download/steamcmd-latest/package.tar.gz"
-        
-        STEAMCMD_BASE_URI="${SELECTED_PROXY}/${raw_steam_url}"
-        QUICK_UPDATE_BASE_PACKAGE="${SELECTED_PROXY}/${raw_package_url}"
-        
-        # Steam CDN使用直连，不通过代理，并测试选择最优源
-        echo -e "\e[34mSteam CDN将使用直连，GitHub资源使用代理: \e[92m${SELECTED_PROXY}\e[0m"
+
+    if [ "$PROXY_URL_BUILT" = false ]; then
+        if [ -n "${SELECTED_PROXY:-}" ]; then
+            STEAMCMD_BASE_URI="${SELECTED_PROXY}/${STEAMCMD_BASE_URI_ORIGINAL}"
+            QUICK_UPDATE_BASE_PACKAGE="${SELECTED_PROXY}/${QUICK_UPDATE_BASE_PACKAGE_ORIGINAL}"
+            echo -e "\e[34mSteam CDN使用直连, GitHub资源将通过代理下载: \e[92m${SELECTED_PROXY}\e[0m"
+        else
+            STEAMCMD_BASE_URI="${STEAMCMD_BASE_URI_ORIGINAL}"
+            QUICK_UPDATE_BASE_PACKAGE="${QUICK_UPDATE_BASE_PACKAGE_ORIGINAL}"
+            echo -e "\e[34mSteam CDN和GitHub资源均使用直连下载\e[0m"
+        fi
         PROXY_URL_BUILT=true
     fi
-    
-    # 测试并选择最优Steam下载源
+
     test_steam_download_speed
-    
+
     NETWORK_TEST_DONE=true
 }
 
@@ -1156,4 +1144,3 @@ function show_help() {
 }
 
 main ${*}
-
