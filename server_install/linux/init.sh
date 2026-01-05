@@ -519,6 +519,15 @@ tui_menu() {
 # 3. 部署向导
 #=============================================================================
 install_steamcmd() {
+    # 修复 SteamCMD Locale (Debian/Ubuntu Root)
+    if [ "$EUID" -eq 0 ] && [ -f /etc/debian_version ] && ! locale -a 2>/dev/null | grep -q "en_US.utf8"; then
+        echo -e "${YELLOW}Fixing SteamCMD Locale (en_US.UTF-8)...${NC}"
+        apt-get update -qq >/dev/null 2>&1
+        apt-get install -y -qq locales >/dev/null 2>&1
+        sed -i 's/# en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen 2>/dev/null
+        locale-gen en_US.UTF-8 >/dev/null 2>&1
+    fi
+
     if [ ! -f "${STEAMCMD_DIR}/steamcmd.sh" ]; then
         echo -e "$M_INIT_STEAMCMD"; mkdir -p "${STEAMCMD_DIR}"
         echo -e "$M_DL_STEAMCMD"
