@@ -351,6 +351,7 @@ function download_and_extract_quick_package() {
 function install_server() {
     trap 'rm -rf "${TMPDIR}"' EXIT
     TMPDIR=$(mktemp -d)
+    echo -e "\e[34m创建临时目录\e[0m \e[92m${TMPDIR}\e[0m"
     if [ "${?}" -ne 0 ]; then
         echo -e "\e[31m临时目录\e[0m \e[31m创建失败\e[0m"
         exit 1
