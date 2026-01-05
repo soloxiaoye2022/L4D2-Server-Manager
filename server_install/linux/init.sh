@@ -37,7 +37,7 @@ function network_test() {
     
     # 代理列表
     local proxy_arr=("https://ghfast.top" "https://git.yylx.win/" "https://gh-proxy.com" "https://ghfile.geekertao.top" "https://gh-proxy.net" "https://j.1win.ggff.net" "https://ghm.078465.xyz" "https://gitproxy.127731.xyz" "https://jiashu.1win.eu.org" "https://github.tbedu.top")
-    local check_url="https://raw.githubusercontent.com/NapNeko/NapCatQQ/main/package.json"
+    local check_url="https://raw.githubusercontent.com/soloxiaoye2022/server_install/refs/heads/main/server_install/linux/README.md"
 
     echo -e "\e[34m开始执行 Github 代理测速...\e[0m"
 
