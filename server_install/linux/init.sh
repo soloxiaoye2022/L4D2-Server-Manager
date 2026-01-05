@@ -642,13 +642,34 @@ inst_plug() {
 
 inst_plat() {
     local d="$1/left4dead2"; mkdir -p "$d"; cd "$d" || return
-    echo -e "${CYAN}下载...${NC}"
-    local m=$(curl -s "https://www.sourcemm.net/downloads.php?branch=stable" | grep -Eo "https://[^']+linux.tar.gz" | head -1)
-    local s=$(curl -s "http://www.sourcemod.net/downloads.php?branch=stable" | grep -Eo "https://[^']+linux.tar.gz" | head -1)
-    wget -qO mm.tar.gz "$m" && tar -zxf mm.tar.gz && rm mm.tar.gz
-    wget -qO sm.tar.gz "$s" && tar -zxf sm.tar.gz && rm sm.tar.gz
+    
+    # 优先检测本地预置包 (位于脚本同级 pkg 目录)
+    local pkg_dir="$FINAL_ROOT/pkg"
+    if [ -f "$pkg_dir/mm.tar.gz" ] && [ -f "$pkg_dir/sm.tar.gz" ]; then
+        echo -e "${CYAN}发现本地预置包，正在安装...${NC}"
+        tar -zxf "$pkg_dir/mm.tar.gz" && tar -zxf "$pkg_dir/sm.tar.gz"
+    else
+        echo -e "${CYAN}正在连接官网(sourcemod.net)获取最新版本...${NC}"
+        local m=$(curl -s "https://www.sourcemm.net/downloads.php?branch=stable" | grep -Eo "https://[^']+linux.tar.gz" | head -1)
+        local s=$(curl -s "http://www.sourcemod.net/downloads.php?branch=stable" | grep -Eo "https://[^']+linux.tar.gz" | head -1)
+        
+        if [ -z "$m" ] || [ -z "$s" ]; then
+            echo -e "${RED}[FAILED] 无法获取下载链接，请检查网络或手动下载。${NC}"; read -n 1 -s -r; return
+        fi
+        
+        echo -e "MetaMod: ${GREY}$(basename "$m")${NC}"
+        echo -e "SourceMod: ${GREY}$(basename "$s")${NC}"
+        
+        if ! wget -qO mm.tar.gz "$m" || ! wget -qO sm.tar.gz "$s"; then
+             echo -e "${RED}[FAILED] 下载失败${NC}"; rm -f mm.tar.gz sm.tar.gz; read -n 1 -s -r; return
+        fi
+        
+        tar -zxf mm.tar.gz && tar -zxf sm.tar.gz
+        rm mm.tar.gz sm.tar.gz
+    fi
+
     if [ -f "$d/addons/metamod.vdf" ]; then sed -i '/"file"/c\\t"file"\t"..\/left4dead2\/addons\/metamod\/bin\/server"' "$d/addons/metamod.vdf"; fi
-    echo "OK"; read -n 1 -s -r
+    echo -e "${GREEN}[SUCCESS] 安装完成${NC}"; read -n 1 -s -r
 }
 
 #=============================================================================
