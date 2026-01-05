@@ -40,6 +40,7 @@ fi
 DATA_FILE="${FINAL_ROOT}/servers.dat"
 JS_MODS_DIR="${FINAL_ROOT}/js-mods"
 STEAMCMD_DIR="${FINAL_ROOT}/steamcmd_common"
+TRAFFIC_DIR="${FINAL_ROOT}/traffic_logs"
 BACKUP_DIR="${FINAL_ROOT}/backups"
 DEFAULT_APPID="222860"
 
@@ -152,6 +153,82 @@ check_port() {
     if command -v lsof >/dev/null; then lsof -i ":$port" >/dev/null 2>&1; return $?; fi
     if command -v netstat >/dev/null; then netstat -tuln | grep -q ":$port "; return $?; fi
     (echo > /dev/tcp/127.0.0.1/$port) >/dev/null 2>&1; return $?
+}
+
+#=============================================================================
+# X. 流量监控 (Root Only)
+#=============================================================================
+traffic_daemon() {
+    if [ "$EUID" -ne 0 ]; then echo "Root only"; exit 1; fi
+    mkdir -p "$TRAFFIC_DIR"
+    iptables -N L4M_STATS 2>/dev/null
+    if ! iptables -C INPUT -j L4M_STATS 2>/dev/null; then iptables -I INPUT -j L4M_STATS; fi
+    if ! iptables -C OUTPUT -j L4M_STATS 2>/dev/null; then iptables -I OUTPUT -j L4M_STATS; fi
+    
+    declare -A last_rx; declare -A last_tx
+    
+    while true; do
+        while IFS='|' read -r n p s port auto; do
+            if [ -n "$port" ]; then
+                for proto in udp tcp; do
+                    if ! iptables -C L4M_STATS -p $proto --dport "$port" 2>/dev/null; then iptables -A L4M_STATS -p $proto --dport "$port"; fi
+                    if ! iptables -C L4M_STATS -p $proto --sport "$port" 2>/dev/null; then iptables -A L4M_STATS -p $proto --sport "$port"; fi
+                done
+            fi
+        done < "$DATA_FILE"
+        
+        local ts=$(date +%s); local m=$(date +%Y%m)
+        local out=$(iptables -nvxL L4M_STATS)
+        
+        while IFS='|' read -r n p s port auto; do
+            if [ -n "$port" ]; then
+                local rx=$(echo "$out" | awk -v p="dpt:$port" '$0 ~ p {sum+=$2} END {print sum+0}')
+                local tx=$(echo "$out" | awk -v p="spt:$port" '$0 ~ p {sum+=$2} END {print sum+0}')
+                local drx=0; local dtx=0
+                
+                if [ -n "${last_rx[$port]}" ]; then
+                    drx=$((rx - ${last_rx[$port]})); dtx=$((tx - ${last_tx[$port]}))
+                    if [ $drx -lt 0 ]; then drx=$rx; fi; if [ $dtx -lt 0 ]; then dtx=$tx; fi
+                fi
+                last_rx[$port]=$rx; last_tx[$port]=$tx
+                
+                if [ $drx -gt 0 ] || [ $dtx -gt 0 ]; then
+                    echo "$ts,$drx,$dtx" >> "${TRAFFIC_DIR}/${n}_${m}.csv"
+                fi
+            fi
+        done < "$DATA_FILE"
+        sleep 300
+    done
+}
+
+view_traffic() {
+    local n="$1"; local port="$2"
+    if [ "$EUID" -ne 0 ]; then echo -e "${RED}需Root权限${NC}"; read -n 1 -s -r; return; fi
+    
+    while true; do
+        tui_header; echo -e "${CYAN}流量统计: $n ($port)${NC}\n----------------------------------------"
+        local r1=$(iptables -nvxL L4M_STATS | awk -v p="dpt:$port" '$0 ~ p {sum+=$2} END {print sum+0}')
+        local t1=$(iptables -nvxL L4M_STATS | awk -v p="spt:$port" '$0 ~ p {sum+=$2} END {print sum+0}')
+        sleep 1
+        local r2=$(iptables -nvxL L4M_STATS | awk -v p="dpt:$port" '$0 ~ p {sum+=$2} END {print sum+0}')
+        local t2=$(iptables -nvxL L4M_STATS | awk -v p="spt:$port" '$0 ~ p {sum+=$2} END {print sum+0}')
+        
+        echo -e "实时: ↓$(numfmt --to=iec --suffix=B/s $((r2-r1)))  ↑$(numfmt --to=iec --suffix=B/s $((t2-t1)))"
+        echo "----------------------------------------"
+        
+        local f="${TRAFFIC_DIR}/${n}_$(date +%Y%m).csv"
+        if [ -f "$f" ]; then
+            local today=$(date +%s -d "today 00:00")
+            local stats=$(awk -F, -v d="$today" '{tr+=$2; tt+=$3} $1 >= d {dr+=$2; dt+=$3} END {printf "%d %d %d %d", dr, dt, tr, tt}' "$f")
+            read dr dt tr tt <<< "$stats"
+            echo -e "今日: ↓$(numfmt --to=iec $dr) ↑$(numfmt --to=iec $dt)"
+            echo -e "本月: ↓$(numfmt --to=iec $tr) ↑$(numfmt --to=iec $tt)"
+        else
+            echo "暂无历史数据"
+        fi
+        echo "----------------------------------------"
+        echo -e "${YELLOW}按任意键返回...${NC}"; read -n 1 -s -r -t 5 k; if [ -n "$k" ]; then break; fi
+    done
 }
 
 #=============================================================================
@@ -270,18 +347,19 @@ control_panel() {
         local st=$(get_status "$n")
         local a_txt="开启自启"; if [ "$auto" == "true" ]; then a_txt="关闭自启"; fi
         
-        tui_menu "管理: $n [$st]" "启动" "停止" "重启" "控制台" "日志" "配置启动参数" "插件管理" "$a_txt" "备份服务端" "返回"
+        tui_menu "管理: $n [$st]" "启动" "停止" "重启" "控制台" "日志" "流量统计" "配置启动参数" "插件管理" "$a_txt" "备份服务端" "返回"
         case $? in
             0) start_srv "$n" "$p" "$port" ;;
             1) stop_srv "$n" ;;
             2) stop_srv "$n"; sleep 1; start_srv "$n" "$p" "$port" ;;
             3) attach_con "$n" ;;
             4) view_log "$p" ;;
-            5) edit_args "$p" ;;
-            6) plugins_menu "$p" ;;
-            7) toggle_auto "$n" "$line"; break ;; # break to refresh
-            8) backup_srv "$n" "$p" ;;
-            9) return ;;
+            5) view_traffic "$n" "$port" ;;
+            6) edit_args "$p" ;;
+            7) plugins_menu "$p" ;;
+            8) toggle_auto "$n" "$line"; break ;; 
+            9) backup_srv "$n" "$p" ;;
+            10) return ;;
         esac
     done
     control_panel "$n" # reload
@@ -356,8 +434,13 @@ setup_global_resume() {
     if [ "$EUID" -eq 0 ]; then
         local s="/etc/systemd/system/l4m-resume.service"
         if [ ! -f "$s" ]; then
-            echo "[Unit]\nDescription=L4M Resume\nAfter=network.target\n[Service]\nType=oneshot\nExecStart=$FINAL_ROOT/l4m resume\nRemainAfterExit=yes\n[Install]\nWantedBy=multi-user.target" > "$s"
+            echo -e "[Unit]\nDescription=L4M Resume\nAfter=network.target\n[Service]\nType=oneshot\nExecStart=$FINAL_ROOT/l4m resume\nRemainAfterExit=yes\n[Install]\nWantedBy=multi-user.target" > "$s"
             systemctl daemon-reload; systemctl enable l4m-resume.service >/dev/null 2>&1
+        fi
+        local m="/etc/systemd/system/l4m-monitor.service"
+        if [ ! -f "$m" ]; then
+            echo -e "[Unit]\nDescription=L4M Traffic Monitor\nAfter=network.target\n[Service]\nExecStart=$FINAL_ROOT/l4m monitor\nRestart=always\n[Install]\nWantedBy=multi-user.target" > "$m"
+            systemctl daemon-reload; systemctl enable --now l4m-monitor.service >/dev/null 2>&1
         fi
     else
         if ! crontab -l 2>/dev/null | grep -q "l4m resume"; then
@@ -486,6 +569,7 @@ main() {
         "install") install_smart; exit 0 ;;
         "update") self_update; exit 0 ;;
         "resume") resume_all; exit 0 ;;
+        "monitor") traffic_daemon; exit 0 ;;
     esac
     
     if [[ "$INSTALL_TYPE" == "temp" ]]; then
