@@ -801,12 +801,45 @@ if [ -d "$folder_path" ]; then
     while IFS= read -r -d '' subfolder; do
         subfolders+=("$subfolder")
     done < <(find "$folder_path" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+else
+    # 尝试自动搜索 JS-MODS
+    echo -e "\e[33m默认路径下未找到 JS-MODS，正在尝试自动搜索...\e[0m"
+    found_path=$(find "${DEFAULT_SH}" -type d -name "JS-MODS" -print -quit 2>/dev/null)
+    
+    if [ -n "$found_path" ]; then
+        echo -e "\e[32m已自动找到 JS-MODS 目录: ${found_path}\e[0m"
+        folder_path="$found_path"
+        # 重新加载子目录
+        while IFS= read -r -d '' subfolder; do
+            subfolders+=("$subfolder")
+        done < <(find "$folder_path" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+    fi
 fi
 
 if [ ${#subfolders[@]} -eq 0 ]; then
     echo -e "\e[31m未在 JS-MODS 目录下找到可用的插件目录\e[0m"
     echo -e "\e[36m当前检测路径: ${folder_path}\e[0m"
     echo -e "\e[33m请确认结构为: JS-MODS/插件名字/left4dead2/... ，而不是直接把文件放在 JS-MODS 根目录或只上传压缩包\e[0m"
+    
+    echo -e "\e[33m是否安装 tree 命令并显示当前目录结构以辅助调试? (y/n)\e[0m"
+    read -r install_tree
+    if [[ "$install_tree" == "y" || "$install_tree" == "Y" ]]; then
+        if command -v apt-get >/dev/null 2>&1; then
+            apt-get update && apt-get install -y tree
+        elif command -v yum >/dev/null 2>&1; then
+            yum install -y tree
+        fi
+        
+        if command -v tree >/dev/null 2>&1; then
+            echo -e "\e[32m当前目录结构 (深度2层):\e[0m"
+            tree -L 2 -N "${DEFAULT_SH}"
+            echo -e "\e[32m提示: 请找到您的 JS-MODS 文件夹位置，并确保它在上述结构中。\e[0m"
+        else
+            echo -e "\e[31mtree 命令安装失败，尝试使用 ls 显示目录:\e[0m"
+            ls -R "${DEFAULT_SH}" | head -n 50
+        fi
+    fi
+    
     return 1
 fi
 
