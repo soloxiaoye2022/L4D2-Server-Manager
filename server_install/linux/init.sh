@@ -83,7 +83,7 @@ function network_test() {
     
     # 优化代理列表 - 保留速度较好的代理
     local proxy_arr=("https://gh-proxy.com" "https://ghm.078465.xyz" "https://ghfast.top" "https://github.tbedu.top")
-    local check_url="https://raw.githubusercontent.com/soloxiaoye2022/server_install/main/README.md"  # 使用更小的文件
+    local check_url="https://github.com/RobLoach/libsteam/archive/master.zip"  # 使用公共库文件进行测速，确保可访问性
 
     echo -e "\e[34m开始执行 Github 代理测速...\e[0m"
 
@@ -166,27 +166,11 @@ function ensure_network_test() {
     
     # 只为GitHub相关URL添加代理，Steam CDN使用直连，且只构建一次
     if [ -n "${SELECTED_PROXY}" ] && [ "$PROXY_URL_BUILT" = false ]; then
-        # 判断代理服务的类型，避免双重代理
-        case "${SELECTED_PROXY}" in
-            *"github.com"*|*"raw.githubusercontent.com"*)
-                # 这是直连或特定GitHub代理，使用完整URL
-                STEAMCMD_BASE_URI="${SELECTED_PROXY}/${STEAMCMD_BASE_URI_ORIGINAL}"
-                QUICK_UPDATE_BASE_PACKAGE="${SELECTED_PROXY}/${QUICK_UPDATE_BASE_PACKAGE_ORIGINAL}"
-                ;;
-            *"gh-proxy.com"*|*"ghm.078465.xyz"*|*"ghfast.top"*|*"github.tbedu.top"*)
-                # 这些是GitHub代理加速服务，需要GitHub路径部分
-                # 提取GitHub路径（去掉https://github.com部分）
-                local github_path_steam=$(echo "${STEAMCMD_BASE_URI_ORIGINAL}" | sed 's|https://github.com/||')
-                local github_path_package=$(echo "${QUICK_UPDATE_BASE_PACKAGE_ORIGINAL}" | sed 's|https://github.com/||')
-                STEAMCMD_BASE_URI="${SELECTED_PROXY}/${github_path_steam}"
-                QUICK_UPDATE_BASE_PACKAGE="${SELECTED_PROXY}/${github_path_package}"
-                ;;
-            *)
-                # 默认处理方式 - 使用完整URL
-                STEAMCMD_BASE_URI="${SELECTED_PROXY}/${STEAMCMD_BASE_URI_ORIGINAL}"
-                QUICK_UPDATE_BASE_PACKAGE="${SELECTED_PROXY}/${QUICK_UPDATE_BASE_PACKAGE_ORIGINAL}"
-                ;;
-        esac
+        # 大多数GitHub加速代理都支持直接拼接完整URL
+        # 格式: https://proxy.com/https://github.com/user/repo...
+        STEAMCMD_BASE_URI="${SELECTED_PROXY}/${STEAMCMD_BASE_URI_ORIGINAL}"
+        QUICK_UPDATE_BASE_PACKAGE="${SELECTED_PROXY}/${QUICK_UPDATE_BASE_PACKAGE_ORIGINAL}"
+        
         # Steam CDN使用直连，不通过代理，并测试选择最优源
         echo -e "\e[34mSteam CDN将使用直连，GitHub资源使用代理: \e[92m${SELECTED_PROXY}\e[0m"
         PROXY_URL_BUILT=true
