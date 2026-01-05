@@ -398,14 +398,21 @@ function execute_quick_package_download() {
     rm -rf "${package_dir}"/*
     
     echo -e "\e[34m正在下载快速更新包...\e[0m"
-    if curl -m 300 -fSLo "${package_dir}/package.tar.gz" "${STEAMCMD_BASE_URI}"; then
-        echo -e "\e[34m快速更新包下载成功，正在解压...\e[0m"
+    echo -e "\e[34m下载地址: \e[36m${QUICK_UPDATE_BASE_PACKAGE}\e[0m"
+    if curl -m 300 -fSLo "${package_dir}/package.tar.gz" "${QUICK_UPDATE_BASE_PACKAGE}"; then
+        echo -e "\e[34m快速更新包下载成功，正在验证文件...\e[0m"
+        # 检查文件类型
+        file_type=$(file "${package_dir}/package.tar.gz" 2>/dev/null | cut -d: -f2)
+        echo -e "\e[34m文件类型: \e[36m${file_type}\e[0m"
+        
         if tar -zxf "${package_dir}/package.tar.gz" -C "${package_dir}"; then
             echo -e "\e[92m快速更新包解压成功\e[0m"
             rm -f "${package_dir}/package.tar.gz"
             return 0
         else
             echo -e "\e[31m快速更新包解压失败\e[0m"
+            echo -e "\e[33m文件大小: $(ls -lh "${package_dir}/package.tar.gz" | awk '{print $5}')\e[0m"
+            echo -e "\e[33m前100字符: $(head -c 100 "${package_dir}/package.tar.gz" 2>/dev/null)\e[0m"
             rm -f "${package_dir}/package.tar.gz"
             return 1
         fi
