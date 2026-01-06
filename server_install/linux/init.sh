@@ -170,6 +170,7 @@ load_i18n() {
         M_PLUG_PLAT="安装平台(SM/MM)"
         M_PLUG_REPO="设置插件库目录"
         M_PLUG_UNINSTALL="卸载插件"
+        M_INSTALLED_PLUGINS="已安装插件"
         M_CUR_REPO="${CYAN}当前插件库:${NC}"
         M_NEW_REPO_PROMPT="${YELLOW}请输入新路径 (留空取消):${NC}"
         M_REPO_NOT_FOUND="${RED}插件库不存在:${NC}"
@@ -285,6 +286,7 @@ load_i18n() {
         M_PLUG_PLAT="Install Platform (SM/MM)"
         M_PLUG_REPO="Set Plugin Repo"
         M_PLUG_UNINSTALL="Uninstall Plugin"
+        M_INSTALLED_PLUGINS="Installed Plugins"
         M_CUR_REPO="${CYAN}Current Repo:${NC}"
         M_NEW_REPO_PROMPT="${YELLOW}New Path (Empty to cancel):${NC}"
         M_REPO_NOT_FOUND="${RED}Repo not found:${NC}"
@@ -862,7 +864,7 @@ backup_srv() {
     # 生成已安装插件列表
     local rec_dir=".plugin_records"
     if [ -d "$rec_dir" ]; then
-        echo "--- Installed Plugins ---" >> "$list"
+        echo "--- $M_INSTALLED_PLUGINS ---" >> "$list"
         for rec_file in "$rec_dir"/*; do
             if [ -f "$rec_file" ]; then
                 echo "$(basename "$rec_file")" >> "$list"
