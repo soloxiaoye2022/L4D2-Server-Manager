@@ -171,6 +171,8 @@ load_i18n() {
         M_PLUG_REPO="设置插件库目录"
         M_PLUG_UNINSTALL="卸载插件"
         M_INSTALLED_PLUGINS="已安装插件"
+        M_DOWNLOAD_PACKAGES="下载插件整合包"
+        M_SELECT_PACKAGES="选择插件整合包"
         M_CUR_REPO="${CYAN}当前插件库:${NC}"
         M_NEW_REPO_PROMPT="${YELLOW}请输入新路径 (留空取消):${NC}"
         M_REPO_NOT_FOUND="${RED}插件库不存在:${NC}"
@@ -287,6 +289,8 @@ load_i18n() {
         M_PLUG_REPO="Set Plugin Repo"
         M_PLUG_UNINSTALL="Uninstall Plugin"
         M_INSTALLED_PLUGINS="Installed Plugins"
+        M_DOWNLOAD_PACKAGES="Download Plugin Packages"
+        M_SELECT_PACKAGES="Select Plugin Packages"
         M_CUR_REPO="${CYAN}Current Repo:${NC}"
         M_NEW_REPO_PROMPT="${YELLOW}New Path (Empty to cancel):${NC}"
         M_REPO_NOT_FOUND="${RED}Repo not found:${NC}"
@@ -389,16 +393,24 @@ self_update() {
 #=============================================================================
 check_deps() {
     local miss=()
-    local req=("tmux" "curl" "wget" "tar" "tree" "sed" "awk" "lsof")
+    local req=("tmux" "curl" "wget" "tar" "tree" "sed" "awk" "lsof" "7z" "unzip")
     for c in "${req[@]}"; do command -v "$c" >/dev/null 2>&1 || miss+=("$c"); done
     if [ ${#miss[@]} -eq 0 ]; then return 0; fi
     
     echo -e "$M_MISSING_DEPS ${miss[*]}"
     local cmd=""
     if [ -f /etc/debian_version ]; then
-        cmd="apt-get update -qq && apt-get install -y -qq ${miss[*]} lib32gcc-s1 lib32stdc++6 ca-certificates"
+        # 添加7zip和unzip依赖，使用p7zip-full和unzip包
+        local deb_pkgs="${miss[*]}"
+        # 如果需要安装7z，替换为p7zip-full
+        deb_pkgs=$(echo "$deb_pkgs" | sed 's/7z/p7zip-full/g')
+        cmd="apt-get update -qq && apt-get install -y -qq $deb_pkgs lib32gcc-s1 lib32stdc++6 ca-certificates"
     elif [ -f /etc/redhat-release ]; then
-        cmd="yum install -y -q ${miss[*]} glibc.i686 libstdc++.i686"
+        # 添加7zip和unzip依赖
+        local rhel_pkgs="${miss[*]}"
+        # 如果需要安装7z，替换为p7zip
+        rhel_pkgs=$(echo "$rhel_pkgs" | sed 's/7z/p7zip/g')
+        cmd="yum install -y -q $rhel_pkgs glibc.i686 libstdc++.i686"
     fi
 
     if [ "$EUID" -ne 0 ]; then
@@ -903,13 +915,79 @@ plugins_menu() {
 
 set_plugin_repo() {
     tui_header; echo -e "$M_CUR_REPO $JS_MODS_DIR"
-    echo -e "$M_NEW_REPO_PROMPT"
-    read -e -i "$JS_MODS_DIR" new
-    if [ -n "$new" ]; then
-        JS_MODS_DIR="$new"; echo "$new" > "$PLUGIN_CONFIG"
-        mkdir -p "$new"; echo -e "$M_SAVED"
-    fi
-    sleep 1
+    
+    # 下载的插件整合包目录
+    local pkg_dir="${FINAL_ROOT}/downloaded_packages"
+    
+    # 显示选择菜单
+    echo -e "${YELLOW}1. 选择已下载的插件整合包${NC}"
+    echo -e "${YELLOW}2. 手动输入插件库目录${NC}"
+    echo -e "${YELLOW}3. 返回${NC}"
+    read -p "> " choice
+    
+    case "$choice" in
+        1)  # 选择已下载的插件整合包
+            # 获取已下载的整合包列表
+            local pkg_list=()
+            for dir in "$pkg_dir"/*; do
+                if [ -d "$dir" ]; then
+                    local name=$(basename "$dir")
+                    pkg_list+=("$name")
+                fi
+            done
+            
+            if [ ${#pkg_list[@]} -eq 0 ]; then
+                echo -e "${YELLOW}没有已下载的插件整合包${NC}"; read -n 1 -s -r; return
+            fi
+            
+            # 显示整合包列表
+            local cur=0; local start=0; local size=15; local tot=${#pkg_list[@]}
+            tput civis; trap 'tput cnorm' EXIT
+            while true; do
+                tui_header; echo -e "${GREEN}选择插件整合包${NC}\n$M_SELECT_HINT\n----------------------------------------"
+                local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
+                for ((j=start;j<end;j++)); do
+                    local m="[ ]"
+                    if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${pkg_list[j]}${NC}"; else echo -e "   $m ${pkg_list[j]}"; fi
+                done
+                read -rsn1 k 2>/dev/null
+                case "$k" in
+                    "") break ;;
+                    "A") ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi ;;
+                    "B") ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi ;;
+                    $'\x1b') read -rsn2 r; if [[ "$r" == "[A" ]]; then ((cur--)); fi; if [[ "$r" == "[B" ]]; then ((cur++)); fi ;;
+                esac
+            done
+            tput cnorm
+            
+            # 设置选中的整合包为插件库
+            if [ $cur -lt ${#pkg_list[@]} ]; then
+                local selected_pkg="${pkg_list[$cur]}"
+                local selected_dir="$pkg_dir/$selected_pkg/JS-MODS"
+                if [ -d "$selected_dir" ]; then
+                    JS_MODS_DIR="$selected_dir"; echo "$selected_dir" > "$PLUGIN_CONFIG"
+                    echo -e "${GREEN}已选择插件库: $selected_dir${NC}"; read -n 1 -s -r
+                else
+                    echo -e "${RED}整合包结构不正确，缺少JS-MODS目录${NC}"; read -n 1 -s -r
+                fi
+            fi
+            ;;
+        2)  # 手动输入插件库目录
+            echo -e "$M_NEW_REPO_PROMPT"
+            read -e -i "$JS_MODS_DIR" new
+            if [ -n "$new" ]; then
+                JS_MODS_DIR="$new"; echo "$new" > "$PLUGIN_CONFIG"
+                mkdir -p "$new"; echo -e "$M_SAVED"
+            fi
+            sleep 1
+            ;;
+        3)  # 返回
+            return
+            ;;
+        *)
+            echo -e "${RED}无效选择${NC}"; read -n 1 -s -r
+            ;;
+    esac
 }
 
 uninstall_plug() {
@@ -1088,6 +1166,110 @@ change_lang() {
     exec "$0"
 }
 
+download_packages() {
+    tui_header; echo -e "${GREEN}$M_DOWNLOAD_PACKAGES${NC}"
+    
+    # 插件整合包下载目录
+    local pkg_dir="${FINAL_ROOT}/downloaded_packages"
+    mkdir -p "$pkg_dir"
+    
+    # 从GitHub仓库获取插件整合包列表
+    local repo="soloxiaoye2022/server_install"
+    local api_url="https://api.github.com/repos/${repo}/contents/豆瓣酱战役整合包"
+    
+    echo -e "${CYAN}正在获取插件整合包列表...${NC}"
+    
+    # 使用curl获取仓库内容
+    local packages=$(curl -s "$api_url" | grep -oP '(?<="name": ")[^"]+\.7z' | grep -i "整合包")
+    
+    if [ -z "$packages" ]; then
+        echo -e "${RED}无法获取插件整合包列表，请检查网络连接${NC}"; read -n 1 -s -r; return
+    fi
+    
+    # 将包名转换为数组
+    local pkg_array=()
+    while IFS= read -r pkg; do
+        pkg_array+=("$pkg")
+    done <<< "$packages"
+    
+    # 显示包列表供用户选择
+    local sel=(); for ((j=0;j<${#pkg_array[@]};j++)); do sel[j]=0; done
+    local cur=0; local start=0; local size=15; local tot=${#pkg_array[@]}
+    
+    tput civis; trap 'tput cnorm' EXIT
+    while true; do
+        tui_header; echo -e "${GREEN}$M_SELECT_PACKAGES${NC}\n$M_SELECT_HINT\n----------------------------------------"
+        local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
+        for ((j=start;j<end;j++)); do
+            local m="[ ]"; if [ "${sel[j]}" -eq 1 ]; then m="[x]"; fi
+            if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${pkg_array[j]}${NC}"; else echo -e "   $m ${pkg_array[j]}"; fi
+        done
+        read -rsn1 k 2>/dev/null
+        case "$k" in
+            "") break ;;
+            " ") if [ "${sel[cur]}" -eq 0 ]; then sel[cur]=1; else sel[cur]=0; fi ;;
+            "A") ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi ;;
+            "B") ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi ;;
+            $'\x1b') read -rsn2 r; if [[ "$r" == "[A" ]]; then ((cur--)); fi; if [[ "$r" == "[B" ]]; then ((cur++)); fi ;;
+        esac
+    done
+    tput cnorm
+    
+    # 下载选中的包
+    local c=0
+    for ((j=0;j<tot;j++)); do
+        if [ "${sel[j]}" -eq 1 ]; then
+            local pkg="${pkg_array[j]}"
+            local raw_url="https://raw.githubusercontent.com/${repo}/main/豆瓣酱战役整合包/${pkg}"
+            local proxy_url="https://gh-proxy.com/${raw_url}"
+            local dest="${pkg_dir}/${pkg}"
+            
+            echo -e "\n${CYAN}正在下载: ${pkg}${NC}"
+            if curl -L -# "$proxy_url" -o "$dest"; then
+                echo -e "${GREEN}下载完成: ${pkg}${NC}"
+                
+                # 解压整合包
+                echo -e "${CYAN}正在解压: ${pkg}${NC}"
+                local unzip_success=false
+                
+                # 尝试使用7z解压
+                if command -v 7z >/dev/null 2>&1; then
+                    if 7z x -o"${pkg_dir}" "$dest" >/dev/null 2>&1; then
+                        unzip_success=true
+                    fi
+                fi
+                
+                # 如果7z失败，尝试使用unzip
+                if [ "$unzip_success" = false ] && command -v unzip >/dev/null 2>&1; then
+                    if unzip "$dest" -d "${pkg_dir}" >/dev/null 2>&1; then
+                        unzip_success=true
+                    fi
+                fi
+                
+                # 如果unzip也失败，尝试使用tar（针对.tar.gz或.tar.bz2格式）
+                if [ "$unzip_success" = false ] && command -v tar >/dev/null 2>&1; then
+                    if tar -xf "$dest" -C "${pkg_dir}" >/dev/null 2>&1; then
+                        unzip_success=true
+                    fi
+                fi
+                
+                if [ "$unzip_success" = true ]; then
+                    echo -e "${GREEN}解压完成: ${pkg}${NC}"
+                    # 解压后删除压缩包
+                    rm -f "$dest"
+                    ((c++))
+                else
+                    echo -e "${RED}解压失败: ${pkg}${NC}"
+                fi
+            else
+                echo -e "${RED}下载失败: ${pkg}${NC}"
+            fi
+        fi
+    done
+    
+    echo -e "\n${GREEN}下载完成，共成功处理 ${c} 个包${NC}"; read -n 1 -s -r
+}
+
 #=============================================================================
 # 6. Main
 #=============================================================================
@@ -1156,9 +1338,9 @@ main() {
     if [ ! -f "$DATA_FILE" ]; then touch "$DATA_FILE"; fi
     
     while true; do
-        tui_menu "$M_MAIN_MENU" "$M_DEPLOY" "$M_MANAGE" "$M_UPDATE" "$M_LANG" "$M_EXIT"
+        tui_menu "$M_MAIN_MENU" "$M_DEPLOY" "$M_MANAGE" "$M_DOWNLOAD_PACKAGES" "$M_UPDATE" "$M_LANG" "$M_EXIT"
         case $? in
-            0) deploy_wizard ;; 1) manage_menu ;; 2) self_update ;; 3) change_lang ;; 4) exit 0 ;;
+            0) deploy_wizard ;; 1) manage_menu ;; 2) download_packages ;; 3) self_update ;; 4) change_lang ;; 5) exit 0 ;;
         esac
     done
 }
