@@ -56,6 +56,17 @@ PLUGIN_CONFIG="${FINAL_ROOT}/plugin_config.dat"
 if [ -f "$PLUGIN_CONFIG" ]; then JS_MODS_DIR=$(cat "$PLUGIN_CONFIG"); else
     if [ "$EUID" -eq 0 ]; then JS_MODS_DIR="/root/L4D2_Plugins"; else JS_MODS_DIR="$HOME/L4D2_Plugins"; fi
 fi
+# 自动创建预设的插件文件夹
+mkdir -p "$JS_MODS_DIR"
+
+# 插件包目录配置
+PKG_CONFIG="${FINAL_ROOT}/pkg_config.dat"
+if [ -f "$PKG_CONFIG" ]; then PKG_DIR=$(cat "$PKG_CONFIG"); else
+    PKG_DIR="${FINAL_ROOT}/pkg"
+fi
+# 自动创建预设的插件包文件夹
+mkdir -p "$PKG_DIR"
+
 STEAMCMD_DIR="${FINAL_ROOT}/steamcmd_common"
 SERVER_CACHE_DIR="${FINAL_ROOT}/server_cache"
 TRAFFIC_DIR="${FINAL_ROOT}/traffic_logs"
@@ -166,6 +177,7 @@ load_i18n() {
         M_PLUG_INSTALL="安装插件"
         M_PLUG_PLAT="安装平台(SM/MM)"
         M_PLUG_REPO="设置插件库目录"
+        M_PLUG_PKG_DIR="设置插件包目录"
         M_CUR_REPO="${CYAN}当前插件库:${NC}"
         M_NEW_REPO_PROMPT="${YELLOW}请输入新路径 (留空取消):${NC}"
         M_REPO_NOT_FOUND="${RED}插件库不存在:${NC}"
@@ -280,6 +292,7 @@ load_i18n() {
         M_PLUG_INSTALL="Install Plugin"
         M_PLUG_PLAT="Install Platform (SM/MM)"
         M_PLUG_REPO="Set Plugin Repo"
+        M_PLUG_PKG_DIR="Set Plugin Package Dir"
         M_CUR_REPO="${CYAN}Current Repo:${NC}"
         M_NEW_REPO_PROMPT="${YELLOW}New Path (Empty to cancel):${NC}"
         M_REPO_NOT_FOUND="${RED}Repo not found:${NC}"
@@ -876,9 +889,9 @@ plugins_menu() {
     local p="$1"
     if [ ! -d "$p/left4dead2" ]; then echo -e "$M_DIR_ERR"; read -n 1 -s -r; return; fi
     while true; do
-        tui_menu "$M_OPT_PLUGINS" "$M_PLUG_INSTALL" "$M_PLUG_PLAT" "$M_PLUG_REPO" "$M_RETURN"
+        tui_menu "$M_OPT_PLUGINS" "$M_PLUG_INSTALL" "$M_PLUG_PLAT" "$M_PLUG_REPO" "$M_PLUG_PKG_DIR" "$M_RETURN"
         case $? in
-            0) inst_plug "$p" ;; 1) inst_plat "$p" ;; 2) set_plugin_repo ;; 3) return ;;
+            0) inst_plug "$p" ;; 1) inst_plat "$p" ;; 2) set_plugin_repo ;; 3) set_plugin_pkg_dir ;; 4) return ;;
         esac
     done
 }
@@ -889,6 +902,17 @@ set_plugin_repo() {
     read -e -i "$JS_MODS_DIR" new
     if [ -n "$new" ]; then
         JS_MODS_DIR="$new"; echo "$new" > "$PLUGIN_CONFIG"
+        mkdir -p "$new"; echo -e "$M_SAVED"
+    fi
+    sleep 1
+}
+
+set_plugin_pkg_dir() {
+    tui_header; echo -e "${CYAN}当前插件包目录:${NC} $PKG_DIR"
+    echo -e "$M_NEW_REPO_PROMPT"
+    read -e -i "$PKG_DIR" new
+    if [ -n "$new" ]; then
+        PKG_DIR="$new"; echo "$new" > "$PKG_CONFIG"
         mkdir -p "$new"; echo -e "$M_SAVED"
     fi
     sleep 1
@@ -948,11 +972,10 @@ inst_plug() {
 inst_plat() {
     local d="$1/left4dead2"; mkdir -p "$d"; cd "$d" || return
     
-    # 优先检测本地预置包 (位于脚本同级 pkg 目录)
-    local pkg_dir="$FINAL_ROOT/pkg"
-    if [ -f "$pkg_dir/mm.tar.gz" ] && [ -f "$pkg_dir/sm.tar.gz" ]; then
+    # 优先检测本地预置包
+    if [ -f "$PKG_DIR/mm.tar.gz" ] && [ -f "$PKG_DIR/sm.tar.gz" ]; then
         echo -e "$M_LOCAL_PKG"
-        tar -zxf "$pkg_dir/mm.tar.gz" && tar -zxf "$pkg_dir/sm.tar.gz"
+        tar -zxf "$PKG_DIR/mm.tar.gz" && tar -zxf "$PKG_DIR/sm.tar.gz"
     else
         echo -e "$M_CONN_OFFICIAL"
         local m=$(curl -s "https://www.sourcemm.net/downloads.php?branch=stable" | grep -Eo "https://[^']+linux.tar.gz" | head -1)
