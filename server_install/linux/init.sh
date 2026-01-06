@@ -24,7 +24,7 @@ SYSTEM_INSTALL_DIR="/usr/local/l4d2_manager"
 USER_INSTALL_DIR="$HOME/.l4d2_manager"
 SYSTEM_BIN="/usr/bin/l4m"
 USER_BIN="$HOME/bin/l4m"
-UPDATE_URL="https://gh-proxy.com/https://raw.githubusercontent.com/soloxiaoye2022/server_install/main/server_install/linux/init.sh"
+
 
 # 2. 智能探测运行环境
 if [[ "$0" == "$SYSTEM_INSTALL_DIR/l4m" ]] || [[ -L "$0" && "$(readlink -f "$0")" == "$SYSTEM_INSTALL_DIR/l4m" ]]; then
@@ -1161,6 +1161,39 @@ inst_plat() {
     echo -e "${GREEN}$M_SUCCESS $M_DONE${NC}"; read -n 1 -s -r
 }
 
+select_mirror() {
+    if [ -n "$MIRROR_SELECTED" ]; then return; fi
+    echo -e "${YELLOW}正在为您挑选最快的 GitHub 镜像节点...${NC}"
+    local mirrors=(
+        "https://gh-proxy.com"
+        "https://ghproxy.net"
+        "https://mirror.ghproxy.com"
+        "https://github.moeyy.xyz"
+    )
+    local best=""
+    local min=10000
+    
+    for m in "${mirrors[@]}"; do
+        local t=$(curl -o /dev/null -s --connect-timeout 2 -m 3 -w "%{time_total}" "$m")
+        if [ $? -eq 0 ]; then
+            local ms=$(awk "BEGIN {print int($t * 1000)}")
+            echo -e "  $m: ${GREEN}${ms}ms${NC}"
+            if [ "$ms" -lt "$min" ]; then min=$ms; best=$m; fi
+        else
+            echo -e "  $m: ${RED}超时${NC}"
+        fi
+    done
+    
+    if [ -n "$best" ]; then
+        echo -e "${GREEN}选中镜像: $best${NC}"
+        UPDATE_URL="${best}/https://raw.githubusercontent.com/soloxiaoye2022/server_install/main/server_install/linux/init.sh"
+    else
+        echo -e "${RED}无可用镜像，使用官方源${NC}"
+        UPDATE_URL="https://raw.githubusercontent.com/soloxiaoye2022/server_install/main/server_install/linux/init.sh"
+    fi
+    MIRROR_SELECTED="true"
+}
+
 change_lang() {
     rm -f "$CONFIG_FILE"
     exec "$0"
@@ -1176,14 +1209,43 @@ download_packages() {
     # 从GitHub仓库获取插件整合包列表
     local repo="soloxiaoye2022/server_install"
     local api_url="https://api.github.com/repos/${repo}/contents/豆瓣酱战役整合包"
+    local proxy_api_url="https://gh-proxy.com/${api_url}"
     
     echo -e "${CYAN}正在获取插件整合包列表...${NC}"
     
-    # 使用curl获取仓库内容
-    local packages=$(curl -s "$api_url" | grep -oP '(?<="name": ")[^"]+\.7z' | grep -i "整合包")
+    # 使用curl获取仓库内容，支持代理
+    local response
+    local packages
+    local curl_success=false
     
-    if [ -z "$packages" ]; then
-        echo -e "${RED}无法获取插件整合包列表，请检查网络连接${NC}"; read -n 1 -s -r; return
+    # 尝试直接连接GitHub API
+    response=$(curl -s "$api_url" -o -)
+    packages=$(echo "$response" | grep -oP '(?<="name": ")[^"]+\.(7z|zip|tar\.gz|tar\.bz2)' | grep -i "整合包")
+    
+    if [ -n "$packages" ]; then
+        curl_success=true
+    else
+        # 直接连接失败，尝试使用代理
+        echo -e "${YELLOW}直接连接失败，尝试使用代理...${NC}"
+        response=$(curl -s "$proxy_api_url" -o -)
+        packages=$(echo "$response" | grep -oP '(?<="name": ")[^"]+\.(7z|zip|tar\.gz|tar\.bz2)' | grep -i "整合包")
+        
+        if [ -n "$packages" ]; then
+            curl_success=true
+        fi
+    fi
+    
+    # 检查是否获取到包列表
+    if [ "$curl_success" = false ] || [ -z "$packages" ]; then
+        echo -e "${RED}无法获取插件整合包列表${NC}"
+        echo -e "${YELLOW}可能的原因：${NC}"
+        echo -e "1. 网络连接问题"
+        echo -e "2. GitHub API访问限制"
+        echo -e "3. 仓库路径或文件名不正确"
+        echo -e "${YELLOW}调试信息：${NC}"
+        echo -e "API URL: $api_url"
+        echo -e "Response snippet: $(echo "$response" | head -20)"
+        read -n 1 -s -r; return
     fi
     
     # 将包名转换为数组
@@ -1303,6 +1365,8 @@ main() {
         fi
     fi
     load_i18n $(cat "$CONFIG_FILE")
+    
+    select_mirror
     
     if [[ "$INSTALL_TYPE" == "temp" ]]; then
         # 优先检测现有安装
