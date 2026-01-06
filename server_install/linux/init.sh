@@ -859,7 +859,18 @@ backup_srv() {
     echo "--- Addons ---" >> "$list"
     if [ -d "left4dead2/addons" ]; then ls -1 "left4dead2/addons" >> "$list"; fi
     
-    local targets=("run_guard.sh" "left4dead2/addons" "left4dead2/cfg" "left4dead2/host.txt" "left4dead2/motd.txt" "left4dead2/mapcycle.txt" "left4dead2/maplist.txt" "$list")
+    # 生成已安装插件列表
+    local rec_dir=".plugin_records"
+    if [ -d "$rec_dir" ]; then
+        echo "--- Installed Plugins ---" >> "$list"
+        for rec_file in "$rec_dir"/*; do
+            if [ -f "$rec_file" ]; then
+                echo "$(basename "$rec_file")" >> "$list"
+            fi
+        done
+    fi
+    
+    local targets=("run_guard.sh" "left4dead2/addons" "left4dead2/cfg" "left4dead2/host.txt" "left4dead2/motd.txt" "left4dead2/mapcycle.txt" "left4dead2/maplist.txt" "$rec_dir" "$list")
     local final=()
     for t in "${targets[@]}"; do if [ -e "$t" ]; then final+=("$t"); fi; done
     
