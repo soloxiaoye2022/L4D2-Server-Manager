@@ -1170,25 +1170,50 @@ select_mirror() {
         "https://mirror.ghproxy.com"
         "https://github.moeyy.xyz"
     )
+    local target_file="https://raw.githubusercontent.com/soloxiaoye2022/server_install/main/LICENSE"
     local best=""
-    local min=10000
+    local min_time=100000 # ms
     
+    # 1. 测试直连
+    local t=$(curl -L -o /dev/null -s --connect-timeout 2 -m 3 -w "%{http_code} %{time_total}" "$target_file")
+    local code=$(echo "$t" | awk '{print $1}')
+    local time=$(echo "$t" | awk '{print int($2 * 1000)}')
+    
+    if [ "$code" -eq 200 ]; then
+        echo -e "  Direct: ${GREEN}${time}ms${NC}"
+        min_time=$time
+        best=""
+    else
+        echo -e "  Direct: ${RED}超时${NC}"
+    fi
+    
+    # 2. 测试镜像
     for m in "${mirrors[@]}"; do
-        local t=$(curl -o /dev/null -s --connect-timeout 2 -m 3 -w "%{time_total}" "$m")
-        if [ $? -eq 0 ]; then
-            local ms=$(awk "BEGIN {print int($t * 1000)}")
-            echo -e "  $m: ${GREEN}${ms}ms${NC}"
-            if [ "$ms" -lt "$min" ]; then min=$ms; best=$m; fi
+        local test_url="${m}/${target_file}"
+        local t=$(curl -L -o /dev/null -s --connect-timeout 2 -m 3 -w "%{http_code} %{time_total}" "$test_url")
+        local code=$(echo "$t" | awk '{print $1}')
+        local time=$(echo "$t" | awk '{print int($2 * 1000)}')
+        
+        if [ "$code" -eq 200 ]; then
+            echo -e "  $m: ${GREEN}${time}ms${NC}"
+            if [ "$time" -lt "$min_time" ]; then
+                min_time=$time
+                best=$m
+            fi
         else
             echo -e "  $m: ${RED}超时${NC}"
         fi
     done
     
     if [ -n "$best" ]; then
-        echo -e "${GREEN}选中镜像: $best${NC}"
+        echo -e "${GREEN}选中最佳镜像: $best${NC}"
         UPDATE_URL="${best}/https://raw.githubusercontent.com/soloxiaoye2022/server_install/main/server_install/linux/init.sh"
     else
-        echo -e "${RED}无可用镜像，使用官方源${NC}"
+        if [ "$min_time" -lt 100000 ]; then
+             echo -e "${GREEN}直连速度最快${NC}"
+        else
+             echo -e "${RED}所有节点均不可用，回退到官方源${NC}"
+        fi
         UPDATE_URL="https://raw.githubusercontent.com/soloxiaoye2022/server_install/main/server_install/linux/init.sh"
     fi
     MIRROR_SELECTED="true"
