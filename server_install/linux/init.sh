@@ -1039,13 +1039,28 @@ uninstall_plug() {
         if [ "${sel[j]}" -eq 1 ]; then 
             local rec_file="$rec_dir/${ps[j]}"
             if [ -f "$rec_file" ]; then
-                # 读取记录文件，删除对应的文件（只删除文件，不删除目录）
+                # 读取记录文件，删除对应的文件和空目录
+                local dirs_to_clean=()
                 while IFS= read -r file_path; do
-                    if [ -n "$file_path" ] && [ -f "$t/$file_path" ]; then  # 只删除文件，不处理目录
-                        rm -f "$t/$file_path" 2>/dev/null
+                    if [ -n "$file_path" ]; then
+                        local full_path="$t/$file_path"
+                        if [ -f "$full_path" ]; then
+                            rm -f "$full_path" 2>/dev/null
+                        fi
+                        # 记录目录以便后续清理
+                        dirs_to_clean+=("$(dirname "$full_path")")
                     fi
                 done < "$rec_file"
                 
+                # 尝试清理空目录 (排序去重，深层目录在前)
+                local sorted_dirs=($(printf "%s\n" "${dirs_to_clean[@]}" | sort -u -r))
+                for d_path in "${sorted_dirs[@]}"; do
+                    # 仅当目录位于 left4dead2 内部且为空时删除
+                    if [[ "$d_path" == "$t"* ]] && [ -d "$d_path" ]; then
+                         rmdir -p --ignore-fail-on-non-empty "$d_path" 2>/dev/null
+                    fi
+                done
+
                 # 删除记录文件
                 rm -f "$rec_file"
                 ((c++))
@@ -1233,53 +1248,96 @@ download_packages() {
     local pkg_dir="${FINAL_ROOT}/downloaded_packages"
     mkdir -p "$pkg_dir"
     
-    # 从GitHub仓库获取插件整合包列表
-    local repo="soloxiaoye2022/server_install"
-    local api_url="https://api.github.com/repos/${repo}/contents/豆瓣酱战役整合包"
-    local proxy_api_url="https://gh-proxy.com/${api_url}"
+    # 尝试探测本地仓库 (适配 WSL/Cygwin/GitBash)
+    local local_warehouse=""
+    local candidates=(
+        "/mnt/e/文档/开发环境/server_install/豆瓣酱战役整合包"
+        "/e/文档/开发环境/server_install/豆瓣酱战役整合包"
+        "/cygdrive/e/文档/开发环境/server_install/豆瓣酱战役整合包"
+        "e:/文档/开发环境/server_install/豆瓣酱战役整合包"
+    )
     
-    echo -e "${CYAN}正在获取插件整合包列表...${NC}"
+    for c in "${candidates[@]}"; do
+        if [ -d "$c" ]; then local_warehouse="$c"; break; fi
+    done
+
+    echo -e "${YELLOW}请选择操作:${NC}"
+    echo -e "1. 从 GitHub 镜像站下载 (网络)"
+    local opt_2_txt="2. 从本地仓库导入 (需手动输入路径)"
+    if [ -n "$local_warehouse" ]; then
+        opt_2_txt="2. 从本地仓库导入 (检测到: $local_warehouse)"
+    fi
+    echo -e "$opt_2_txt"
+    echo -e "3. 返回"
+    read -p "> " choice
     
-    # 使用curl获取仓库内容，支持代理
-    local response
-    local packages
-    local curl_success=false
+    local pkg_array=()
+    local source_mode=""
+    local source_path=""
     
-    # 尝试直接连接GitHub API
-    response=$(curl -s "$api_url" -o -)
-    packages=$(echo "$response" | grep -oP '(?<="name": ")[^"]+\.(7z|zip|tar\.gz|tar\.bz2)' | grep -i "整合包")
-    
-    if [ -n "$packages" ]; then
-        curl_success=true
-    else
-        # 直接连接失败，尝试使用代理
-        echo -e "${YELLOW}直接连接失败，尝试使用代理...${NC}"
-        response=$(curl -s "$proxy_api_url" -o -)
+    if [ "$choice" == "1" ]; then
+        source_mode="network"
+        # 从GitHub仓库获取插件整合包列表
+        local repo="soloxiaoye2022/server_install"
+        local api_url="https://api.github.com/repos/${repo}/contents/豆瓣酱战役整合包"
+        local proxy_api_url="https://gh-proxy.com/${api_url}"
+        
+        echo -e "${CYAN}正在获取插件整合包列表...${NC}"
+        
+        # 使用curl获取仓库内容，支持代理
+        local response
+        local packages
+        local curl_success=false
+        
+        # 尝试直接连接GitHub API
+        response=$(curl -s "$api_url" -o -)
         packages=$(echo "$response" | grep -oP '(?<="name": ")[^"]+\.(7z|zip|tar\.gz|tar\.bz2)' | grep -i "整合包")
         
         if [ -n "$packages" ]; then
             curl_success=true
+        else
+            # 直接连接失败，尝试使用代理
+            echo -e "${YELLOW}直接连接失败，尝试使用代理...${NC}"
+            response=$(curl -s "$proxy_api_url" -o -)
+            packages=$(echo "$response" | grep -oP '(?<="name": ")[^"]+\.(7z|zip|tar\.gz|tar\.bz2)' | grep -i "整合包")
+            
+            if [ -n "$packages" ]; then
+                curl_success=true
+            fi
         fi
+        
+        # 检查是否获取到包列表
+        if [ "$curl_success" = false ] || [ -z "$packages" ]; then
+            echo -e "${RED}无法获取插件整合包列表${NC}"
+            read -n 1 -s -r; return
+        fi
+        
+        # 将包名转换为数组
+        while IFS= read -r pkg; do
+            pkg_array+=("$pkg")
+        done <<< "$packages"
+        
+    elif [ "$choice" == "2" ]; then
+        source_mode="local"
+        local target_path="$local_warehouse"
+        if [ -z "$target_path" ]; then
+            echo -e "${YELLOW}请输入本地仓库的绝对路径:${NC}"
+            read -e target_path
+        fi
+        
+        if [ ! -d "$target_path" ]; then echo -e "${RED}目录不存在。${NC}"; read -n 1 -s -r; return; fi
+        source_path="$target_path"
+        
+        echo -e "${CYAN}正在扫描本地仓库...${NC}"
+        # 扫描本地文件
+        while IFS= read -r -d '' file; do
+            pkg_array+=("$(basename "$file")")
+        done < <(find "$target_path" -maxdepth 1 \( -name "*.7z" -o -name "*.zip" -o -name "*.tar.gz" \) -print0)
+        
+        if [ ${#pkg_array[@]} -eq 0 ]; then echo -e "${RED}未找到压缩包。${NC}"; read -n 1 -s -r; return; fi
+    else
+        return
     fi
-    
-    # 检查是否获取到包列表
-    if [ "$curl_success" = false ] || [ -z "$packages" ]; then
-        echo -e "${RED}无法获取插件整合包列表${NC}"
-        echo -e "${YELLOW}可能的原因：${NC}"
-        echo -e "1. 网络连接问题"
-        echo -e "2. GitHub API访问限制"
-        echo -e "3. 仓库路径或文件名不正确"
-        echo -e "${YELLOW}调试信息：${NC}"
-        echo -e "API URL: $api_url"
-        echo -e "Response snippet: $(echo "$response" | head -20)"
-        read -n 1 -s -r; return
-    fi
-    
-    # 将包名转换为数组
-    local pkg_array=()
-    while IFS= read -r pkg; do
-        pkg_array+=("$pkg")
-    done <<< "$packages"
     
     # 显示包列表供用户选择
     local sel=(); for ((j=0;j<${#pkg_array[@]};j++)); do sel[j]=0; done
@@ -1304,18 +1362,37 @@ download_packages() {
     done
     tput cnorm
     
-    # 下载选中的包
+    # 下载/复制并解压选中的包
     local c=0
     for ((j=0;j<tot;j++)); do
         if [ "${sel[j]}" -eq 1 ]; then
             local pkg="${pkg_array[j]}"
-            local raw_url="https://raw.githubusercontent.com/${repo}/main/豆瓣酱战役整合包/${pkg}"
-            local proxy_url="https://gh-proxy.com/${raw_url}"
             local dest="${pkg_dir}/${pkg}"
+            local process_success=false
             
-            echo -e "\n${CYAN}正在下载: ${pkg}${NC}"
-            if curl -L -# "$proxy_url" -o "$dest"; then
-                echo -e "${GREEN}下载完成: ${pkg}${NC}"
+            if [ "$source_mode" == "network" ]; then
+                local repo="soloxiaoye2022/server_install"
+                local raw_url="https://raw.githubusercontent.com/${repo}/main/豆瓣酱战役整合包/${pkg}"
+                local proxy_url="https://gh-proxy.com/${raw_url}"
+                
+                echo -e "\n${CYAN}正在下载: ${pkg}${NC}"
+                if curl -L -# "$proxy_url" -o "$dest"; then
+                    process_success=true
+                else
+                    echo -e "${RED}下载失败: ${pkg}${NC}"
+                fi
+            else
+                # Local copy
+                echo -e "\n${CYAN}正在导入: ${pkg}${NC}"
+                if cp "$source_path/$pkg" "$dest"; then
+                    process_success=true
+                else
+                    echo -e "${RED}复制失败: ${pkg}${NC}"
+                fi
+            fi
+            
+            if [ "$process_success" = true ]; then
+                echo -e "${GREEN}获取成功: ${pkg}${NC}"
                 
                 # 解压整合包
                 echo -e "${CYAN}正在解压: ${pkg}${NC}"
@@ -1323,19 +1400,19 @@ download_packages() {
                 
                 # 尝试使用7z解压
                 if command -v 7z >/dev/null 2>&1; then
-                    if 7z x -o"${pkg_dir}" "$dest" >/dev/null 2>&1; then
+                    if 7z x -y -o"${pkg_dir}" "$dest" >/dev/null 2>&1; then
                         unzip_success=true
                     fi
                 fi
                 
                 # 如果7z失败，尝试使用unzip
                 if [ "$unzip_success" = false ] && command -v unzip >/dev/null 2>&1; then
-                    if unzip "$dest" -d "${pkg_dir}" >/dev/null 2>&1; then
+                    if unzip -o "$dest" -d "${pkg_dir}" >/dev/null 2>&1; then
                         unzip_success=true
                     fi
                 fi
                 
-                # 如果unzip也失败，尝试使用tar（针对.tar.gz或.tar.bz2格式）
+                # 如果unzip也失败，尝试使用tar
                 if [ "$unzip_success" = false ] && command -v tar >/dev/null 2>&1; then
                     if tar -xf "$dest" -C "${pkg_dir}" >/dev/null 2>&1; then
                         unzip_success=true
@@ -1344,19 +1421,16 @@ download_packages() {
                 
                 if [ "$unzip_success" = true ]; then
                     echo -e "${GREEN}解压完成: ${pkg}${NC}"
-                    # 解压后删除压缩包
                     rm -f "$dest"
                     ((c++))
                 else
                     echo -e "${RED}解压失败: ${pkg}${NC}"
                 fi
-            else
-                echo -e "${RED}下载失败: ${pkg}${NC}"
             fi
         fi
     done
     
-    echo -e "\n${GREEN}下载完成，共成功处理 ${c} 个包${NC}"; read -n 1 -s -r
+    echo -e "\n${GREEN}处理完成，共成功 ${c} 个包${NC}"; read -n 1 -s -r
 }
 
 #=============================================================================
