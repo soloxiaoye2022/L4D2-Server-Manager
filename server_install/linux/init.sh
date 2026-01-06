@@ -946,14 +946,10 @@ uninstall_plug() {
         if [ "${sel[j]}" -eq 1 ]; then 
             local rec_file="$rec_dir/${ps[j]}"
             if [ -f "$rec_file" ]; then
-                # 读取记录文件，删除对应的文件
+                # 读取记录文件，删除对应的文件（只删除文件，不删除目录）
                 while IFS= read -r file_path; do
-                    if [ -n "$file_path" ] && [ -e "$t/$file_path" ]; then
+                    if [ -n "$file_path" ] && [ -f "$t/$file_path" ]; then  # 只删除文件，不处理目录
                         rm -f "$t/$file_path" 2>/dev/null
-                        # 如果是目录且为空，也删除
-                        if [ -d "$t/$file_path" ] && [ -z "$(ls -A "$t/$file_path" 2>/dev/null)" ]; then
-                            rm -rf "$t/$file_path" 2>/dev/null
-                        fi
                     fi
                 done < "$rec_file"
                 
@@ -1018,21 +1014,23 @@ inst_plug() {
             # 清空记录文件
             > "$rec_file"
             
-            # 复制文件并记录
+            # 复制文件并记录（只记录文件，不记录目录）
             while IFS= read -r -d '' file; do
-                # 获取相对路径（相对于插件目录）
-                local rel_path=${file#"$plugin_dir/"}
-                local dest="$t/$rel_path"
-                
-                # 创建目标目录
-                mkdir -p "$(dirname "$dest")"
-                
-                # 复制文件或目录
-                cp -rf "$file" "$dest" 2>/dev/null
-                
-                # 记录文件路径
-                echo "$rel_path" >> "$rec_file"
-            done < <(find "$plugin_dir" -type f -o -type d -print0 | sort -z)
+                if [ -f "$file" ]; then  # 只处理文件，目录会在复制时自动创建
+                    # 获取相对路径（相对于插件目录）
+                    local rel_path=${file#"$plugin_dir/"}
+                    local dest="$t/$rel_path"
+                    
+                    # 创建目标目录
+                    mkdir -p "$(dirname "$dest")"
+                    
+                    # 复制文件
+                    cp -f "$file" "$dest" 2>/dev/null
+                    
+                    # 记录文件路径
+                    echo "$rel_path" >> "$rec_file"
+                fi
+            done < <(find "$plugin_dir" -type f -print0 | sort -z)
             
             ((c++))
         fi
