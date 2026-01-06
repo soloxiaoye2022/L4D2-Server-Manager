@@ -320,6 +320,7 @@ NC='\033[0m'
 # 0. 智能安装与更新模块
 #=============================================================================
 install_smart() {
+    select_mirror
     echo -e "${CYAN}$M_INIT_INSTALL${NC}"
     local target_dir=""
     local link_path=""
@@ -373,6 +374,7 @@ install_smart() {
 }
 
 self_update() {
+    select_mirror
     echo -e "$M_CHECK_UPDATE"
     local temp="/tmp/l4m_upd.sh"
     if curl -L -# "$UPDATE_URL" -o "$temp"; then
