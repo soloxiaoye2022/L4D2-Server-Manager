@@ -901,21 +901,23 @@ set_plugin_repo() {
 
 uninstall_plug() {
     local t="$1/left4dead2"
-    local rec="$1/.installed_plugins"
+    local rec_dir="$1/.plugin_records"
     
-    if [ ! -f "$rec" ] || [ ! -s "$rec" ]; then 
-        echo -e "${YELLOW}No plugins installed${NC}"; read -n 1 -s -r; return; 
-    fi
+    # 确保记录目录存在
+    mkdir -p "$rec_dir"
     
     # 获取已安装的插件列表
     local ps=(); local d=()
-    while IFS= read -r n; do
-        if [ -n "$n" ]; then
+    for rec_file in "$rec_dir"/*; do
+        if [ -f "$rec_file" ]; then
+            local n=$(basename "$rec_file")
             ps+=("$n"); d+=("$n")
         fi
-    done < "$rec"
+    done
     
-    if [ ${#ps[@]} -eq 0 ]; then echo -e "${YELLOW}No plugins installed${NC}"; read -n 1 -s -r; return; fi
+    if [ ${#ps[@]} -eq 0 ]; then 
+        echo -e "${YELLOW}No plugins installed${NC}"; read -n 1 -s -r; return; 
+    fi
     
     local sel=(); for ((j=0;j<${#ps[@]};j++)); do sel[j]=0; done
     local cur=0; local start=0; local size=15; local tot=${#ps[@]}
@@ -942,10 +944,23 @@ uninstall_plug() {
     local c=0
     for ((j=0;j<tot;j++)); do
         if [ "${sel[j]}" -eq 1 ]; then 
-            # 从记录文件中移除插件名称，不删除实际文件
-            grep -vFx "${ps[j]}" "$rec" > "${rec}.tmp"
-            mv "${rec}.tmp" "$rec"
-            ((c++))
+            local rec_file="$rec_dir/${ps[j]}"
+            if [ -f "$rec_file" ]; then
+                # 读取记录文件，删除对应的文件
+                while IFS= read -r file_path; do
+                    if [ -n "$file_path" ] && [ -e "$t/$file_path" ]; then
+                        rm -f "$t/$file_path" 2>/dev/null
+                        # 如果是目录且为空，也删除
+                        if [ -d "$t/$file_path" ] && [ -z "$(ls -A "$t/$file_path" 2>/dev/null)" ]; then
+                            rm -rf "$t/$file_path" 2>/dev/null
+                        fi
+                    fi
+                done < "$rec_file"
+                
+                # 删除记录文件
+                rm -f "$rec_file"
+                ((c++))
+            fi
         fi
     done
     echo -e "$M_DONE $c"; read -n 1 -s -r
@@ -953,14 +968,17 @@ uninstall_plug() {
 
 inst_plug() {
     local t="$1/left4dead2"
+    local rec_dir="$1/.plugin_records"
+    
     if [ ! -d "$JS_MODS_DIR" ]; then echo -e "$M_REPO_NOT_FOUND $JS_MODS_DIR"; read -n 1 -s -r; return; fi
     
-    local rec="$1/.installed_plugins"; if [ ! -f "$rec" ]; then touch "$rec"; fi
+    # 确保记录目录存在
+    mkdir -p "$rec_dir"
     
     local ps=(); local d=()
     while IFS= read -r -d '' dir; do
         local n=$(basename "$dir")
-        if grep -qFx "$n" "$rec"; then
+        if [ -f "$rec_dir/$n" ]; then
             ps+=("$n"); d+=("$n $M_INSTALLED")
         else
             ps+=("$n"); d+=("$n")
@@ -994,8 +1012,28 @@ inst_plug() {
     local c=0
     for ((j=0;j<tot;j++)); do
         if [ "${sel[j]}" -eq 1 ]; then 
-            cp -rf "${JS_MODS_DIR}/${ps[j]}/"* "$t/" 2>/dev/null
-            if ! grep -qFx "${ps[j]}" "$rec"; then echo "${ps[j]}" >> "$rec"; fi
+            local plugin_dir="${JS_MODS_DIR}/${ps[j]}"
+            local rec_file="$rec_dir/${ps[j]}"
+            
+            # 清空记录文件
+            > "$rec_file"
+            
+            # 复制文件并记录
+            while IFS= read -r -d '' file; do
+                # 获取相对路径（相对于插件目录）
+                local rel_path=${file#"$plugin_dir/"}
+                local dest="$t/$rel_path"
+                
+                # 创建目标目录
+                mkdir -p "$(dirname "$dest")"
+                
+                # 复制文件或目录
+                cp -rf "$file" "$dest" 2>/dev/null
+                
+                # 记录文件路径
+                echo "$rel_path" >> "$rec_file"
+            done < <(find "$plugin_dir" -type f -o -type d -print0 | sort -z)
+            
             ((c++))
         fi
     done
