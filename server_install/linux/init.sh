@@ -59,14 +59,6 @@ fi
 # 自动创建预设的插件文件夹
 mkdir -p "$JS_MODS_DIR"
 
-# 插件包目录配置
-PKG_CONFIG="${FINAL_ROOT}/pkg_config.dat"
-if [ -f "$PKG_CONFIG" ]; then PKG_DIR=$(cat "$PKG_CONFIG"); else
-    PKG_DIR="${FINAL_ROOT}/pkg"
-fi
-# 自动创建预设的插件包文件夹
-mkdir -p "$PKG_DIR"
-
 STEAMCMD_DIR="${FINAL_ROOT}/steamcmd_common"
 SERVER_CACHE_DIR="${FINAL_ROOT}/server_cache"
 TRAFFIC_DIR="${FINAL_ROOT}/traffic_logs"
@@ -177,7 +169,7 @@ load_i18n() {
         M_PLUG_INSTALL="安装插件"
         M_PLUG_PLAT="安装平台(SM/MM)"
         M_PLUG_REPO="设置插件库目录"
-        M_PLUG_PKG_DIR="设置插件包目录"
+        M_PLUG_UNINSTALL="卸载插件"
         M_CUR_REPO="${CYAN}当前插件库:${NC}"
         M_NEW_REPO_PROMPT="${YELLOW}请输入新路径 (留空取消):${NC}"
         M_REPO_NOT_FOUND="${RED}插件库不存在:${NC}"
@@ -292,7 +284,7 @@ load_i18n() {
         M_PLUG_INSTALL="Install Plugin"
         M_PLUG_PLAT="Install Platform (SM/MM)"
         M_PLUG_REPO="Set Plugin Repo"
-        M_PLUG_PKG_DIR="Set Plugin Package Dir"
+        M_PLUG_UNINSTALL="Uninstall Plugin"
         M_CUR_REPO="${CYAN}Current Repo:${NC}"
         M_NEW_REPO_PROMPT="${YELLOW}New Path (Empty to cancel):${NC}"
         M_REPO_NOT_FOUND="${RED}Repo not found:${NC}"
@@ -889,9 +881,9 @@ plugins_menu() {
     local p="$1"
     if [ ! -d "$p/left4dead2" ]; then echo -e "$M_DIR_ERR"; read -n 1 -s -r; return; fi
     while true; do
-        tui_menu "$M_OPT_PLUGINS" "$M_PLUG_INSTALL" "$M_PLUG_PLAT" "$M_PLUG_REPO" "$M_PLUG_PKG_DIR" "$M_RETURN"
+        tui_menu "$M_OPT_PLUGINS" "$M_PLUG_INSTALL" "$M_PLUG_UNINSTALL" "$M_PLUG_PLAT" "$M_PLUG_REPO" "$M_RETURN"
         case $? in
-            0) inst_plug "$p" ;; 1) inst_plat "$p" ;; 2) set_plugin_repo ;; 3) set_plugin_pkg_dir ;; 4) return ;;
+            0) inst_plug "$p" ;; 1) uninstall_plug "$p" ;; 2) inst_plat "$p" ;; 3) set_plugin_repo ;; 4) return ;;
         esac
     done
 }
@@ -907,15 +899,56 @@ set_plugin_repo() {
     sleep 1
 }
 
-set_plugin_pkg_dir() {
-    tui_header; echo -e "${CYAN}当前插件包目录:${NC} $PKG_DIR"
-    echo -e "$M_NEW_REPO_PROMPT"
-    read -e -i "$PKG_DIR" new
-    if [ -n "$new" ]; then
-        PKG_DIR="$new"; echo "$new" > "$PKG_CONFIG"
-        mkdir -p "$new"; echo -e "$M_SAVED"
+uninstall_plug() {
+    local t="$1/left4dead2"
+    local rec="$1/.installed_plugins"
+    
+    if [ ! -f "$rec" ] || [ ! -s "$rec" ]; then 
+        echo -e "${YELLOW}No plugins installed${NC}"; read -n 1 -s -r; return; 
     fi
-    sleep 1
+    
+    # 获取已安装的插件列表
+    local ps=(); local d=()
+    while IFS= read -r n; do
+        if [ -n "$n" ]; then
+            ps+=("$n"); d+=("$n")
+        fi
+    done < "$rec"
+    
+    if [ ${#ps[@]} -eq 0 ]; then echo -e "${YELLOW}No plugins installed${NC}"; read -n 1 -s -r; return; fi
+    
+    local sel=(); for ((j=0;j<${#ps[@]};j++)); do sel[j]=0; done
+    local cur=0; local start=0; local size=15; local tot=${#ps[@]}
+    
+    tput civis; trap 'tput cnorm' EXIT
+    while true; do
+        tui_header; echo -e "$M_SELECT_HINT\n----------------------------------------"
+        local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
+        for ((j=start;j<end;j++)); do
+            local m="[ ]"; if [ "${sel[j]}" -eq 1 ]; then m="[x]"; fi
+            if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${d[j]}${NC}"; else echo -e "   $m ${d[j]}"; fi
+        done
+        read -rsn1 k 2>/dev/null
+        case "$k" in
+            "") break ;;
+            " ") if [ "${sel[cur]}" -eq 0 ]; then sel[cur]=1; else sel[cur]=0; fi ;;
+            "A") ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi ;;
+            "B") ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi ;;
+            $'\x1b') read -rsn2 r; if [[ "$r" == "[A" ]]; then ((cur--)); fi; if [[ "$r" == "[B" ]]; then ((cur++)); fi ;;
+        esac
+    done
+    tput cnorm
+    
+    local c=0
+    for ((j=0;j<tot;j++)); do
+        if [ "${sel[j]}" -eq 1 ]; then 
+            # 从记录文件中移除插件名称，不删除实际文件
+            grep -vFx "${ps[j]}" "$rec" > "${rec}.tmp"
+            mv "${rec}.tmp" "$rec"
+            ((c++))
+        fi
+    done
+    echo -e "$M_DONE $c"; read -n 1 -s -r
 }
 
 inst_plug() {
@@ -972,10 +1005,11 @@ inst_plug() {
 inst_plat() {
     local d="$1/left4dead2"; mkdir -p "$d"; cd "$d" || return
     
-    # 优先检测本地预置包
-    if [ -f "$PKG_DIR/mm.tar.gz" ] && [ -f "$PKG_DIR/sm.tar.gz" ]; then
+    # 优先检测本地预置包 (位于脚本同级 pkg 目录)
+    local pkg_dir="$FINAL_ROOT/pkg"
+    if [ -f "$pkg_dir/mm.tar.gz" ] && [ -f "$pkg_dir/sm.tar.gz" ]; then
         echo -e "$M_LOCAL_PKG"
-        tar -zxf "$PKG_DIR/mm.tar.gz" && tar -zxf "$PKG_DIR/sm.tar.gz"
+        tar -zxf "$pkg_dir/mm.tar.gz" && tar -zxf "$pkg_dir/sm.tar.gz"
     else
         echo -e "$M_CONN_OFFICIAL"
         local m=$(curl -s "https://www.sourcemm.net/downloads.php?branch=stable" | grep -Eo "https://[^']+linux.tar.gz" | head -1)
