@@ -1014,27 +1014,41 @@ set_plugin_repo() {
     echo -e "${YELLOW}3. 返回${NC}"
     read -p "> " choice
     
+    # 动态计算分页大小 (这里也要用，因为 case 1 用到了 size)
+    local term_lines=$(tput lines)
+    local size=$((term_lines - 8))
+    if [ $size -lt 5 ]; then size=5; fi
+    
     case "$choice" in
         1)
             local pkg_list=()
             for dir in "$pkg_dir"/*; do if [ -d "$dir" ]; then pkg_list+=("$(basename "$dir")"); fi; done
             if [ ${#pkg_list[@]} -eq 0 ]; then echo -e "${YELLOW}没有已下载的插件整合包${NC}"; read -n 1 -s -r; return; fi
             
-            local cur=0; local start=0; local size=15; local tot=${#pkg_list[@]}
-            tput civis; trap 'tput cnorm' EXIT
-            while true; do
-                tui_header; echo -e "${GREEN}选择插件整合包${NC}\n$M_SELECT_HINT\n----------------------------------------"
-                local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
-                for ((j=start;j<end;j++)); do
-                    if [ $j -eq $cur ]; then echo -e "${GREEN}-> [ ] ${pkg_list[j]}${NC}"; else echo -e "   [ ] ${pkg_list[j]}"; fi
-                done
-                IFS= read -rsn1 k 2>/dev/null
-                if [[ "$k" == "" ]]; then break;
-                elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi
-                elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; fi
-                fi
-            done
-            tput cnorm
+            local cur=0; local start=0; local tot=${#pkg_list[@]}
+    tput civis; trap 'tput cnorm' EXIT
+    
+    tui_header; echo -e "${GREEN}选择插件整合包${NC}\n$M_SELECT_HINT\n----------------------------------------"
+    
+    while true; do
+        tui_header; echo -e "${GREEN}选择插件整合包${NC}\n$M_SELECT_HINT\n----------------------------------------"
+        local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
+        for ((j=start;j<end;j++)); do
+            local clr_eol=$(tput el)
+            if [ $j -eq $cur ]; then echo -e "${GREEN}-> [ ] ${pkg_list[j]}${NC}${clr_eol}"; else echo -e "   [ ] ${pkg_list[j]}${clr_eol}"; fi
+        done
+        for ((j=end;j<start+size;j++)); do echo "$(tput el)"; done
+        
+        IFS= read -rsn1 k 2>/dev/null
+        if [[ "$k" == "" ]]; then break;
+        elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
+        elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+        fi
+        
+        if [ $cur -lt $start ]; then start=$cur; fi
+        if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+    done
+    tput cnorm
             
             if [ $cur -lt ${#pkg_list[@]} ]; then
                 local selected_dir="$pkg_dir/${pkg_list[$cur]}/JS-MODS"
