@@ -91,9 +91,12 @@ NC='\033[0m'
 
 # URL编码函数 (支持中文和特殊字符)
 urlencode() {
-    local length="${#1}"
+    # 强制使用 C 语言环境处理字节，避免 UTF-8 字符被错误截断或转码
+    local LC_ALL=C
+    local string="$1"
+    local length="${#string}"
     for (( i = 0; i < length; i++ )); do
-        local c="${1:i:1}"
+        local c="${string:i:1}"
         case $c in
             [a-zA-Z0-9.~_-]) printf "$c" ;;
             *) printf '%%%02X' "'$c" ;;
@@ -234,7 +237,8 @@ download_file() {
             url="${mirror}/https://raw.githubusercontent.com/$encoded_path"
         fi
         
-        # echo -e "  Attempting: $mirror" # Debug
+        # 打印调试信息 (响应用户要求)
+        echo -e "${GREY}  [Debug] URL: $url${NC}"
         
         # 执行下载
         # -L: 跟随重定向
