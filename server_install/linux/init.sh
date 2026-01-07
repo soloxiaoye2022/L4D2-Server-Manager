@@ -107,7 +107,7 @@ urlencode() {
 # 检查依赖
 check_deps() {
     local miss=()
-    local req=("tmux" "curl" "wget" "tar" "tree" "sed" "awk" "lsof" "7z" "unzip" "file")
+    local req=("tmux" "curl" "wget" "tar" "tree" "sed" "awk" "lsof" "7z" "unzip" "file" "whiptail")
     for c in "${req[@]}"; do command -v "$c" >/dev/null 2>&1 || miss+=("$c"); done
     if [ ${#miss[@]} -eq 0 ]; then return 0; fi
     
@@ -352,10 +352,30 @@ download_file() {
 #=============================================================================
 # 4. TUI 界面框架
 #=============================================================================
-tui_header() { clear; echo -e "${BLUE}$M_TITLE${NC}\n"; }
+tui_header() { 
+    if command -v whiptail >/dev/null 2>&1; then return; fi
+    clear; echo -e "${BLUE}$M_TITLE${NC}\n"; 
+}
 
 tui_input() {
     local p="$1"; local d="$2"; local v="$3"; local pass="$4"
+    
+    if command -v whiptail >/dev/null 2>&1; then
+        local h=10
+        local w=60
+        local type="--inputbox"
+        if [ "$pass" == "true" ]; then type="--passwordbox"; fi
+        
+        local val
+        val=$(whiptail --title "$M_TITLE" "$type" "$p" $h $w "$d" 3>&1 1>&2 2>&3)
+        if [ $? -eq 0 ]; then
+            eval $v=\"\$val\"
+        else
+            eval $v=""
+        fi
+        return
+    fi
+
     if [ -n "$d" ]; then echo -e "${YELLOW}$p ${GREY}[默认: $d]${NC}"; else echo -e "${YELLOW}$p${NC}"; fi
     if [ "$pass" == "true" ]; then read -s -p "> " i; echo ""; else read -p "> " i; fi
     if [ -z "$i" ] && [ -n "$d" ]; then eval $v="$d"; else eval $v=\"\$i\"; fi
@@ -363,6 +383,30 @@ tui_input() {
 
 tui_menu() {
     local t="$1"; shift; local opts=("$@"); local sel=0; local tot=${#opts[@]}
+    
+    if command -v whiptail >/dev/null 2>&1; then
+        local args=()
+        for ((i=0; i<tot; i++)); do
+            args+=("$i" "${opts[i]}")
+        done
+        
+        local h=$(tput lines)
+        local w=$(tput cols)
+        if [ $h -gt 25 ]; then h=25; fi
+        if [ $w -gt 80 ]; then w=80; fi
+        local list_h=$((h - 8))
+        if [ $list_h -lt 5 ]; then list_h=5; fi
+        
+        local choice
+        choice=$(whiptail --title "$M_TITLE" --menu "$t" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
+        
+        if [ $? -eq 0 ]; then
+            return $choice
+        else
+            return 255
+        fi
+    fi
+
     tput civis; trap 'tput cnorm' EXIT
     while true; do
         tui_header; echo -e "${YELLOW}$t${NC}\n----------------------------------------"
@@ -681,55 +725,84 @@ download_packages() {
     fi
     
     # 选择逻辑
-    local sel=(); for ((j=0;j<${#pkg_array[@]};j++)); do sel[j]=0; done
-    local cur=0; local start=0; local size=15; local tot=${#pkg_array[@]}
-    
-    tput civis; trap 'tput cnorm' EXIT
-    
-    # 首次绘制头部
-    tui_header; echo -e "${GREEN}$M_SELECT_PACKAGES${NC}\n$M_SELECT_HINT\n----------------------------------------"
-    
-    while true; do
-        # 使用 tput cup 移动光标，避免 clear 造成的闪烁
-        # 注意: 这里假设 header + hint + separator 占用约 4-5 行。
-        # 为简单起见，我们还是重绘列表部分，但先尝试移动光标回列表起始位置
-        # 如果无法精确控制，退回到清屏重绘，但尝试优化显示
-        
-        # 简单优化: 仅在每次循环清屏重绘 (如果用户觉得闪，可能是 clear 导致)
-        # 尝试移除循环内的 tui_header 调用，改为手动覆盖
-        
-        tui_header; echo -e "${GREEN}$M_SELECT_PACKAGES${NC}\n$M_SELECT_HINT\n----------------------------------------"
-        local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
-        for ((j=start;j<end;j++)); do
-            local m="[ ]"; if [ "${sel[j]}" -eq 1 ]; then m="[x]"; fi
-            # 清除行内余下内容，防止残留
-            local clr_eol=$(tput el)
-            if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${pkg_array[j]}${NC}${clr_eol}"; else echo -e "   $m ${pkg_array[j]}${clr_eol}"; fi
+    if command -v whiptail >/dev/null 2>&1; then
+        local args=()
+        for ((j=0;j<${#pkg_array[@]};j++)); do
+            args+=("${pkg_array[j]}" "" "OFF")
         done
-        # 清除列表下方的潜在残留行 (如果列表变短)
-        for ((j=end;j<start+size;j++)); do echo "$(tput el)"; done
         
-        IFS= read -rsn1 k 2>/dev/null
-        if [[ "$k" == "" ]]; then break;
-        elif [[ "$k" == " " ]]; then if [ "${sel[cur]}" -eq 0 ]; then sel[cur]=1; else sel[cur]=0; fi
-        elif [[ "$k" == $'\x1b' ]]; then
-             read -rsn2 -t 0.1 r
-             if [[ "$r" == "[A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
-             elif [[ "$r" == "[B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
-             elif [[ -z "$r" ]]; then tput cnorm; return; fi
-             fi
-        elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
-        elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
-        fi
+        local h=$(tput lines)
+        local w=$(tput cols)
+        if [ $h -gt 25 ]; then h=25; fi
+        if [ $w -gt 80 ]; then w=80; fi
+        local list_h=$((h - 8))
+        if [ $list_h -lt 5 ]; then list_h=5; fi
         
-        # 修正: start 必须保证 cur 在 [start, start+size) 区间内
-        # 当 cur 循环回到 0 时，start 设为 0
-        # 当 cur 循环回到 last 时，start 设为 max(0, tot-size)
-        # 上面的逻辑处理了步进，但循环跳转需要额外检查
-        if [ $cur -lt $start ]; then start=$cur; fi
-        if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
-    done
-    tput cnorm
+        local choices
+        choices=$(whiptail --title "$M_SELECT_PACKAGES" --checklist "$M_SELECT_HINT" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
+        
+        if [ $? -ne 0 ]; then return; fi
+        
+        # whiptail returns quoted strings like "item1" "item2"
+        # We need to map them back to pkg_array to set sel array
+        local sel=(); for ((j=0;j<${#pkg_array[@]};j++)); do sel[j]=0; done
+        
+        # Removing quotes and matching
+        choices="${choices//\"/}"
+        
+        for choice in $choices; do
+            for ((j=0;j<${#pkg_array[@]};j++)); do
+                if [ "${pkg_array[j]}" == "$choice" ]; then
+                    sel[j]=1
+                    break
+                fi
+            done
+        done
+        
+        # tot is needed for the processing loop below
+        local tot=${#pkg_array[@]}
+    else
+        # Fallback to pure bash TUI
+        local sel=(); for ((j=0;j<${#pkg_array[@]};j++)); do sel[j]=0; done
+        local cur=0; local start=0; local size=15; local tot=${#pkg_array[@]}
+        
+        tput civis; trap 'tput cnorm' EXIT
+        
+        # 首次绘制头部
+        tui_header; echo -e "${GREEN}$M_SELECT_PACKAGES${NC}\n$M_SELECT_HINT\n----------------------------------------"
+        
+        while true; do
+            # ... (Existing pure bash loop logic)
+            tui_header; echo -e "${GREEN}$M_SELECT_PACKAGES${NC}\n$M_SELECT_HINT\n----------------------------------------"
+            local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
+            for ((j=start;j<end;j++)); do
+                local m="[ ]"; if [ "${sel[j]}" -eq 1 ]; then m="[x]"; fi
+                # 清除行内余下内容，防止残留
+                local clr_eol=$(tput el)
+                if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${pkg_array[j]}${NC}${clr_eol}"; else echo -e "   $m ${pkg_array[j]}${clr_eol}"; fi
+            done
+            # 清除列表下方的潜在残留行 (如果列表变短)
+            for ((j=end;j<start+size;j++)); do echo "$(tput el)"; done
+            
+            IFS= read -rsn1 k 2>/dev/null
+            if [[ "$k" == "" ]]; then break;
+            elif [[ "$k" == " " ]]; then if [ "${sel[cur]}" -eq 0 ]; then sel[cur]=1; else sel[cur]=0; fi
+            elif [[ "$k" == $'\x1b' ]]; then
+                 read -rsn2 -t 0.1 r
+                 if [[ "$r" == "[A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
+                 elif [[ "$r" == "[B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+                 elif [[ -z "$r" ]]; then tput cnorm; return; fi
+                 fi
+            elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
+            elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+            fi
+            
+            # 修正: start 必须保证 cur 在 [start, start+size) 区间内
+            if [ $cur -lt $start ]; then start=$cur; fi
+            if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+        done
+        tput cnorm
+    fi
     
     # 处理选中的包
     local c=0
@@ -826,48 +899,94 @@ inst_plug() {
     
     if [ ${#ps[@]} -eq 0 ]; then echo "$M_REPO_EMPTY"; read -n 1 -s -r; return; fi
     
-    local sel=(); for ((j=0;j<${#ps[@]};j++)); do sel[j]=0; done
+    local tot=${#ps[@]}
+    local sel=(); for ((j=0;j<tot;j++)); do sel[j]=0; done
     
-    # 动态计算分页大小
-    local term_lines=$(tput lines)
-    # 保留行: 头部(2) + Hint(2) + 边框(1) + 底部提示(1) = ~6行
-    local size=$((term_lines - 8))
-    if [ $size -lt 5 ]; then size=5; fi
-    
-    local cur=0; local start=0; local tot=${#ps[@]}
-    
-    tput civis; trap 'tput cnorm' EXIT
-    
-    # 首次绘制
-    tui_header; echo -e "$M_SELECT_HINT\n----------------------------------------"
-    
-    while true; do
-        tui_header; echo -e "$M_SELECT_HINT\n----------------------------------------"
-        local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
-        for ((j=start;j<end;j++)); do
-            local m="[ ]"; if [ "${sel[j]}" -eq 1 ]; then m="[x]"; fi
-            local clr_eol=$(tput el)
-            if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${d[j]}${NC}${clr_eol}"; else echo -e "   $m ${d[j]}${clr_eol}"; fi
+    if command -v whiptail >/dev/null 2>&1; then
+        local args=()
+        for ((j=0;j<tot;j++)); do
+            args+=("${d[j]}" "" "OFF")
         done
-        for ((j=end;j<start+size;j++)); do echo "$(tput el)"; done
         
-        IFS= read -rsn1 k 2>/dev/null
-        if [[ "$k" == "" ]]; then break;
-        elif [[ "$k" == " " ]]; then if [ "${sel[cur]}" -eq 0 ]; then sel[cur]=1; else sel[cur]=0; fi
-        elif [[ "$k" == $'\x1b' ]]; then
-             read -rsn2 -t 0.1 r
-             if [[ "$r" == "[A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
-             elif [[ "$r" == "[B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
-             elif [[ -z "$r" ]]; then tput cnorm; return; fi
-             fi
-        elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
-        elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
-        fi
+        local h=$(tput lines)
+        local w=$(tput cols)
+        if [ $h -gt 25 ]; then h=25; fi
+        if [ $w -gt 80 ]; then w=80; fi
+        local list_h=$((h - 8))
+        if [ $list_h -lt 5 ]; then list_h=5; fi
         
-        if [ $cur -lt $start ]; then start=$cur; fi
-        if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
-    done
-    tput cnorm
+        local choices
+        choices=$(whiptail --title "$M_PLUG_INSTALL" --checklist "$M_SELECT_HINT" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
+        
+        if [ $? -ne 0 ]; then return; fi
+        
+        choices="${choices//\"/}"
+        for choice in $choices; do
+            for ((j=0;j<tot;j++)); do
+                # whiptail returns the TAG (first col), which we set to ${d[j]}
+                # But ${d[j]} might contain spaces (e.g. "plugin [Installed]")
+                # whiptail handles tags with spaces if quoted, but our parsing above might be fragile if tags contain spaces.
+                # BETTER: Use index as tag.
+                :
+            done
+        done
+        
+        # Re-do args with index as tag for reliability
+        args=()
+        for ((j=0;j<tot;j++)); do
+            args+=("$j" "${d[j]}" "OFF")
+        done
+        
+        choices=$(whiptail --title "$M_PLUG_INSTALL" --checklist "$M_SELECT_HINT" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
+        if [ $? -ne 0 ]; then return; fi
+        
+        choices="${choices//\"/}"
+        for idx in $choices; do
+            sel[$idx]=1
+        done
+        
+    else
+        # Fallback to pure bash TUI
+        local cur=0; local start=0; 
+        
+        # 动态计算分页大小
+        local term_lines=$(tput lines)
+        local size=$((term_lines - 8))
+        if [ $size -lt 5 ]; then size=5; fi
+        
+        tput civis; trap 'tput cnorm' EXIT
+        
+        # 首次绘制
+        tui_header; echo -e "$M_SELECT_HINT\n----------------------------------------"
+        
+        while true; do
+            tui_header; echo -e "$M_SELECT_HINT\n----------------------------------------"
+            local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
+            for ((j=start;j<end;j++)); do
+                local m="[ ]"; if [ "${sel[j]}" -eq 1 ]; then m="[x]"; fi
+                local clr_eol=$(tput el)
+                if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${d[j]}${NC}${clr_eol}"; else echo -e "   $m ${d[j]}${clr_eol}"; fi
+            done
+            for ((j=end;j<start+size;j++)); do echo "$(tput el)"; done
+            
+            IFS= read -rsn1 k 2>/dev/null
+            if [[ "$k" == "" ]]; then break;
+            elif [[ "$k" == " " ]]; then if [ "${sel[cur]}" -eq 0 ]; then sel[cur]=1; else sel[cur]=0; fi
+            elif [[ "$k" == $'\x1b' ]]; then
+                 read -rsn2 -t 0.1 r
+                 if [[ "$r" == "[A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
+                 elif [[ "$r" == "[B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+                 elif [[ -z "$r" ]]; then tput cnorm; return; fi
+                 fi
+            elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
+            elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+            fi
+            
+            if [ $cur -lt $start ]; then start=$cur; fi
+            if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+        done
+        tput cnorm
+    fi
     
     # 统计选中数量
     local total_selected=0
@@ -915,46 +1034,73 @@ uninstall_plug() {
     
     if [ ${#ps[@]} -eq 0 ]; then echo -e "${YELLOW}No plugins installed${NC}"; read -n 1 -s -r; return; fi
     
-    local sel=(); for ((j=0;j<${#ps[@]};j++)); do sel[j]=0; done
+    local tot=${#ps[@]}
+    local sel=(); for ((j=0;j<tot;j++)); do sel[j]=0; done
     
-    # 动态计算分页大小
-    local term_lines=$(tput lines)
-    local size=$((term_lines - 8))
-    if [ $size -lt 5 ]; then size=5; fi
-    
-    local cur=0; local start=0; local tot=${#ps[@]}
-    
-    tput civis; trap 'tput cnorm' EXIT
-    
-    tui_header; echo -e "$M_SELECT_HINT\n----------------------------------------"
-    
-    while true; do
-        tui_header; echo -e "$M_SELECT_HINT\n----------------------------------------"
-        local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
-        for ((j=start;j<end;j++)); do
-            local m="[ ]"; if [ "${sel[j]}" -eq 1 ]; then m="[x]"; fi
-            local clr_eol=$(tput el)
-            if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${d[j]}${NC}${clr_eol}"; else echo -e "   $m ${d[j]}${clr_eol}"; fi
+    if command -v whiptail >/dev/null 2>&1; then
+        local args=()
+        for ((j=0;j<tot;j++)); do
+            args+=("$j" "${ps[j]}" "OFF")
         done
-        for ((j=end;j<start+size;j++)); do echo "$(tput el)"; done
         
-        IFS= read -rsn1 k 2>/dev/null
-        if [[ "$k" == "" ]]; then break;
-        elif [[ "$k" == " " ]]; then if [ "${sel[cur]}" -eq 0 ]; then sel[cur]=1; else sel[cur]=0; fi
-        elif [[ "$k" == $'\x1b' ]]; then
-             read -rsn2 -t 0.1 r
-             if [[ "$r" == "[A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
-             elif [[ "$r" == "[B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
-             elif [[ -z "$r" ]]; then tput cnorm; return; fi
-             fi
-        elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
-        elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
-        fi
+        local h=$(tput lines)
+        local w=$(tput cols)
+        if [ $h -gt 25 ]; then h=25; fi
+        if [ $w -gt 80 ]; then w=80; fi
+        local list_h=$((h - 8))
+        if [ $list_h -lt 5 ]; then list_h=5; fi
         
-        if [ $cur -lt $start ]; then start=$cur; fi
-        if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
-    done
-    tput cnorm
+        local choices
+        choices=$(whiptail --title "$M_PLUG_UNINSTALL" --checklist "$M_SELECT_HINT" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
+        if [ $? -ne 0 ]; then return; fi
+        
+        choices="${choices//\"/}"
+        for idx in $choices; do
+            sel[$idx]=1
+        done
+        
+    else
+        # Fallback to pure bash TUI
+        local cur=0; local start=0; 
+        
+        # 动态计算分页大小
+        local term_lines=$(tput lines)
+        local size=$((term_lines - 8))
+        if [ $size -lt 5 ]; then size=5; fi
+        
+        tput civis; trap 'tput cnorm' EXIT
+        
+        # 首次绘制
+        tui_header; echo -e "$M_SELECT_HINT\n----------------------------------------"
+        
+        while true; do
+            tui_header; echo -e "$M_SELECT_HINT\n----------------------------------------"
+            local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
+            for ((j=start;j<end;j++)); do
+                local m="[ ]"; if [ "${sel[j]}" -eq 1 ]; then m="[x]"; fi
+                local clr_eol=$(tput el)
+                if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${d[j]}${NC}${clr_eol}"; else echo -e "   $m ${d[j]}${clr_eol}"; fi
+            done
+            for ((j=end;j<start+size;j++)); do echo "$(tput el)"; done
+            
+            IFS= read -rsn1 k 2>/dev/null
+            if [[ "$k" == "" ]]; then break;
+            elif [[ "$k" == " " ]]; then if [ "${sel[cur]}" -eq 0 ]; then sel[cur]=1; else sel[cur]=0; fi
+            elif [[ "$k" == $'\x1b' ]]; then
+                 read -rsn2 -t 0.1 r
+                 if [[ "$r" == "[A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
+                 elif [[ "$r" == "[B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+                 elif [[ -z "$r" ]]; then tput cnorm; return; fi
+                 fi
+            elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
+            elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+            fi
+            
+            if [ $cur -lt $start ]; then start=$cur; fi
+            if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+        done
+        tput cnorm
+    fi
     
     # 统计选中数量
     local total_selected=0
@@ -1037,36 +1183,60 @@ set_plugin_repo() {
             for dir in "$pkg_dir"/*; do if [ -d "$dir" ]; then pkg_list+=("$(basename "$dir")"); fi; done
             if [ ${#pkg_list[@]} -eq 0 ]; then echo -e "${YELLOW}没有已下载的插件整合包${NC}"; read -n 1 -s -r; return; fi
             
-            local cur=0; local start=0; local tot=${#pkg_list[@]}
-    tput civis; trap 'tput cnorm' EXIT
-    
-    tui_header; echo -e "${GREEN}选择插件整合包${NC}\n$M_SELECT_HINT\n----------------------------------------"
-    
-    while true; do
-        tui_header; echo -e "${GREEN}选择插件整合包${NC}\n$M_SELECT_HINT\n----------------------------------------"
-        local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
-        for ((j=start;j<end;j++)); do
-            local clr_eol=$(tput el)
-            if [ $j -eq $cur ]; then echo -e "${GREEN}-> [ ] ${pkg_list[j]}${NC}${clr_eol}"; else echo -e "   [ ] ${pkg_list[j]}${clr_eol}"; fi
-        done
-        for ((j=end;j<start+size;j++)); do echo "$(tput el)"; done
-        
-        IFS= read -rsn1 k 2>/dev/null
-        if [[ "$k" == "" ]]; then break;
-        elif [[ "$k" == $'\x1b' ]]; then
-             read -rsn2 -t 0.1 r
-             if [[ "$r" == "[A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
-             elif [[ "$r" == "[B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
-             elif [[ -z "$r" ]]; then tput cnorm; return; fi
-             fi
-        elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
-        elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
-        fi
-        
-        if [ $cur -lt $start ]; then start=$cur; fi
-        if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
-    done
-    tput cnorm
+            local cur=0
+            local tot=${#pkg_list[@]}
+            
+            if command -v whiptail >/dev/null 2>&1; then
+                local args=()
+                for ((j=0;j<tot;j++)); do
+                    args+=("$j" "${pkg_list[j]}")
+                done
+                
+                local h=$(tput lines)
+                local w=$(tput cols)
+                if [ $h -gt 25 ]; then h=25; fi
+                if [ $w -gt 80 ]; then w=80; fi
+                local list_h=$((h - 8))
+                if [ $list_h -lt 5 ]; then list_h=5; fi
+                
+                local choice
+                choice=$(whiptail --title "$M_PLUG_REPO" --menu "$M_SELECT_HINT" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
+                
+                if [ $? -ne 0 ]; then return; fi
+                cur=$choice
+            else
+                # Fallback to pure bash TUI
+                local start=0
+                tput civis; trap 'tput cnorm' EXIT
+                
+                tui_header; echo -e "${GREEN}选择插件整合包${NC}\n$M_SELECT_HINT\n----------------------------------------"
+                
+                while true; do
+                    tui_header; echo -e "${GREEN}选择插件整合包${NC}\n$M_SELECT_HINT\n----------------------------------------"
+                    local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
+                    for ((j=start;j<end;j++)); do
+                        local clr_eol=$(tput el)
+                        if [ $j -eq $cur ]; then echo -e "${GREEN}-> [ ] ${pkg_list[j]}${NC}${clr_eol}"; else echo -e "   [ ] ${pkg_list[j]}${clr_eol}"; fi
+                    done
+                    for ((j=end;j<start+size;j++)); do echo "$(tput el)"; done
+                    
+                    IFS= read -rsn1 k 2>/dev/null
+                    if [[ "$k" == "" ]]; then break;
+                    elif [[ "$k" == $'\x1b' ]]; then
+                         read -rsn2 -t 0.1 r
+                         if [[ "$r" == "[A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
+                         elif [[ "$r" == "[B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+                         elif [[ -z "$r" ]]; then tput cnorm; return; fi
+                         fi
+                    elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
+                    elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+                    fi
+                    
+                    if [ $cur -lt $start ]; then start=$cur; fi
+                    if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+                done
+                tput cnorm
+            fi
             
             if [ $cur -lt ${#pkg_list[@]} ]; then
                 local selected_dir="$pkg_dir/${pkg_list[$cur]}/JS-MODS"
