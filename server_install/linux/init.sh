@@ -862,9 +862,22 @@ inst_plug() {
     done
     tput cnorm
     
+    # 统计选中数量
+    local total_selected=0
+    for ((j=0;j<tot;j++)); do
+        if [ "${sel[j]}" -eq 1 ]; then ((total_selected++)); fi
+    done
+    
+    if [ $total_selected -eq 0 ]; then return; fi
+    
+    echo -e "\n${CYAN}开始安装 $total_selected 个插件...${NC}"
+    
     local c=0
     for ((j=0;j<tot;j++)); do
         if [ "${sel[j]}" -eq 1 ]; then 
+            ((c++))
+            echo -e "[${c}/${total_selected}] ${GREEN}正在安装: ${ps[j]}${NC}"
+            
             local plugin_dir="${JS_MODS_DIR}/${ps[j]}"
             local rec_file="$rec_dir/${ps[j]}"
             > "$rec_file"
@@ -878,7 +891,6 @@ inst_plug() {
                     echo "$rel_path" >> "$rec_file"
                 fi
             done < <(find "$plugin_dir" -type f -print0 | sort -z)
-            ((c++))
         fi
     done
     echo -e "$M_DONE $c"; read -n 1 -s -r
@@ -936,9 +948,22 @@ uninstall_plug() {
     done
     tput cnorm
     
+    # 统计选中数量
+    local total_selected=0
+    for ((j=0;j<tot;j++)); do
+        if [ "${sel[j]}" -eq 1 ]; then ((total_selected++)); fi
+    done
+    
+    if [ $total_selected -eq 0 ]; then return; fi
+    
+    echo -e "\n${CYAN}开始卸载 $total_selected 个插件...${NC}"
+    
     local c=0
     for ((j=0;j<tot;j++)); do
         if [ "${sel[j]}" -eq 1 ]; then 
+            ((c++))
+            echo -e "[${c}/${total_selected}] ${YELLOW}正在卸载: ${ps[j]}${NC}"
+            
             local rec_file="$rec_dir/${ps[j]}"
             if [ -f "$rec_file" ]; then
                 local dirs_to_clean=()
@@ -955,7 +980,6 @@ uninstall_plug() {
                     if [[ "$d_path" == "$t"* ]] && [ -d "$d_path" ]; then rmdir -p --ignore-fail-on-non-empty "$d_path" 2>/dev/null; fi
                 done
                 rm -f "$rec_file"
-                ((c++))
             fi
         fi
     done
