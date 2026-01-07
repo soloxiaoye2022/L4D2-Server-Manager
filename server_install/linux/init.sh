@@ -875,7 +875,11 @@ uninstall_plug() {
 plugins_menu() {
     local p="$1"
     # 修复：只检查基础目录，不强制要求 left4dead2 子目录存在 (可能尚未首次运行生成)
-    if [ ! -d "$p" ]; then echo -e "$M_DIR_ERR"; read -n 1 -s -r; return; fi
+    if [ ! -d "$p" ]; then 
+        echo -e "${RED}目录错: 找不到路径 '$p'${NC}"
+        echo -e "${YELLOW}可能原因: 实例路径被移动或包含特殊字符。${NC}"
+        read -n 1 -s -r; return
+    fi
     
     # 确保 left4dead2 目录存在
     mkdir -p "$p/left4dead2"
@@ -1127,7 +1131,14 @@ manage_menu() {
 
 control_panel() {
     local n="$1"
-    local line=$(grep "^${n}|" "$DATA_FILE")
+    # 使用 awk 精确匹配第一列 (服务器名称)，避免 grep 前缀匹配问题 (如 test 匹配 test2)
+    local line=$(awk -F'|' -v t="$n" '$1 == t {print $0; exit}' "$DATA_FILE")
+    
+    if [ -z "$line" ]; then
+        echo -e "${RED}Error: 无法在数据文件中找到实例 '$n'${NC}"
+        read -n 1 -s -r; return
+    fi
+    
     local p=$(echo "$line" | cut -d'|' -f2)
     local port=$(echo "$line" | cut -d'|' -f4)
     local auto=$(echo "$line" | cut -d'|' -f5)
