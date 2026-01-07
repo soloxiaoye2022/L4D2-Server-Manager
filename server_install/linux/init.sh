@@ -234,7 +234,20 @@ download_file() {
         # -L: 跟随重定向
         # -f: HTTP错误时不输出内容
         # --retry 2: 重试2次
+        local dl_success=false
+        
+        # 1. 尝试 curl
         if curl -L -f --retry 2 --connect-timeout 10 -m 600 -# "$url" -o "$save_path"; then
+            dl_success=true
+        else
+            # 2. 尝试 wget (用户建议)
+            echo -e "${YELLOW}  curl 尝试失败，切换 wget...${NC}"
+            if wget --no-check-certificate -q --show-progress --tries=2 --timeout=10 -O "$save_path" "$url"; then
+                dl_success=true
+            fi
+        fi
+
+        if [ "$dl_success" = true ]; then
             # 校验文件大小 (防止下载到 HTML 错误页或空文件)
             local fsize=$(wc -c < "$save_path" 2>/dev/null || echo 0)
             if [ "$fsize" -gt 1024 ]; then # 大于 1KB 认为有效
@@ -242,6 +255,7 @@ download_file() {
                 break
             else
                 echo -e "${YELLOW}  警告: 文件过小 ($fsize bytes)，尝试下一个源...${NC}"
+                rm -f "$save_path"
             fi
         fi
     done
@@ -495,35 +509,47 @@ download_packages() {
         source_mode="network"
         echo -e "${CYAN}正在获取插件整合包列表...${NC}"
         
-        # 尝试下载目录列表 JSON
-        local list_file="/tmp/l4m_pkg_list.json"
-        if download_file "soloxiaoye2022/L4D2-Server-Manager/main/l4d2_plugins" "$list_file" "Package List"; then
-             # 这种方式下载的可能是 HTML，GitHub Raw 不支持列目录。
-             # 我们需要调用 GitHub API。
-             rm -f "$list_file" # 清理错误下载
-             
-             # 使用 API 获取
-             local api_url="https://api.github.com/repos/soloxiaoye2022/L4D2-Server-Manager/contents/l4d2_plugins"
-             local proxy_api="https://gh-proxy.com/${api_url}"
-             
-             local content=$(curl -s "$proxy_api")
-             # 如果代理失败，尝试直连
-             if [[ -z "$content" || "$content" == *"error"* ]]; then
-                 content=$(curl -s "$api_url")
+        # 尝试通过 GitHub API 获取文件列表
+        select_best_mirror
+        local api_url="https://api.github.com/repos/soloxiaoye2022/L4D2-Server-Manager/contents/l4d2_plugins"
+        local content=""
+        
+        # 构建尝试列表
+        local try_list=("$BEST_MIRROR")
+        for m in "${MIRRORS[@]}"; do if [ "$m" != "$BEST_MIRROR" ]; then try_list+=("$m"); fi; done
+        
+        for mirror in "${try_list[@]}"; do
+             local target_url=""
+             if [ "$mirror" == "DIRECT" ]; then
+                 target_url="$api_url"
+             else
+                 target_url="${mirror}/${api_url}"
              fi
              
-             local packages=$(echo "$content" | grep -oP '(?<="name": ")[^"]+\.(7z|zip|tar\.gz|tar\.bz2)' | grep -i "整合包")
-             
-             if [ -z "$packages" ]; then
-                 echo -e "${RED}无法获取插件列表。${NC}"; read -n 1 -s -r; return
+             echo -e "  正在连接 API: $mirror"
+             if content=$(curl -sL --connect-timeout 5 -m 10 "$target_url"); then
+                 # 简单校验 JSON 返回
+                 if [[ "$content" == *"name"* && "$content" != *"error"* && "$content" != *"404"* ]]; then
+                      break
+                 fi
              fi
-             
-             while IFS= read -r pkg; do
-                pkg_array+=("$pkg")
-             done <<< "$packages"
-        else
-             echo -e "${RED}无法连接到仓库。${NC}"; read -n 1 -s -r; return
+             content=""
+        done
+        
+        if [ -z "$content" ]; then
+             echo -e "${RED}无法获取插件列表 (API连接失败)。${NC}"; read -n 1 -s -r; return
         fi
+        
+        # 提取文件名 (兼容非 GNU grep)
+        local packages=$(echo "$content" | grep -o '"name": "[^"]*"' | cut -d'"' -f4 | grep -E '\.(7z|zip|tar\.gz|tar\.bz2)$' | grep -i "整合包")
+             
+        if [ -z "$packages" ]; then
+            echo -e "${RED}未找到任何整合包。${NC}"; read -n 1 -s -r; return
+        fi
+        
+        while IFS= read -r pkg; do
+           pkg_array+=("$pkg")
+        done <<< "$packages"
         
     elif [ "$choice" == "2" ]; then
         source_mode="local"
