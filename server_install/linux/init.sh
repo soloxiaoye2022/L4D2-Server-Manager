@@ -607,24 +607,47 @@ download_packages() {
              fi
              
              echo -e "  正在连接 API: $mirror"
-             if content=$(curl -sL --connect-timeout 5 -m 10 "$target_url"); then
-                 # 简单校验 JSON 返回
-                 if [[ "$content" == *"name"* && "$content" != *"error"* && "$content" != *"404"* ]]; then
-                      break
+             # 增加 -H Accept: application/vnd.github.v3+json 以明确请求 JSON
+             # 增加 -H User-Agent 防止被拦截
+             local temp_content
+             if temp_content=$(curl -sL --connect-timeout 5 -m 10 -H "Accept: application/vnd.github.v3+json" -H "User-Agent: curl/7.68.0" "$target_url"); then
+                 # 增强校验: 必须是 JSON 数组或对象，且包含 "name" 字段
+                 # 检查是否以 [ 或 { 开头
+                 if [[ "$temp_content" =~ ^\s*\[ || "$temp_content" =~ ^\s*\{ ]]; then
+                     if [[ "$temp_content" == *"name"* && "$temp_content" != *"error"* && "$temp_content" != *"404"* ]]; then
+                          content="$temp_content"
+                          
+                          # 立即尝试提取，确保数据有效
+                          local test_extract=$(echo "$content" | grep -o '"name": "[^"]*"' | cut -d'"' -f4 | grep -E '\.(7z|zip|tar\.gz|tar\.bz2)$' | grep -i "整合包")
+                          if [ -n "$test_extract" ]; then
+                              break
+                          else
+                              echo -e "${YELLOW}  API 返回了 JSON 但未找到整合包，尝试下一个源...${NC}"
+                              # echo -e "${GREY}Debug: ${content:0:100}...${NC}"
+                          fi
+                     else
+                          echo -e "${YELLOW}  API 返回内容无效 (不包含 name 或包含 error)，尝试下一个源...${NC}"
+                     fi
+                 else
+                     echo -e "${YELLOW}  API 返回非 JSON 内容 (可能是 HTML)，尝试下一个源...${NC}"
                  fi
+             else
+                 echo -e "${YELLOW}  连接超时或失败，尝试下一个源...${NC}"
              fi
-             content=""
         done
         
         if [ -z "$content" ]; then
-             echo -e "${RED}无法获取插件列表 (API连接失败)。${NC}"; read -n 1 -s -r; return
+             echo -e "${RED}无法获取插件列表 (所有镜像源均失效)。${NC}"; read -n 1 -s -r; return
         fi
         
         # 提取文件名 (兼容非 GNU grep)
         local packages=$(echo "$content" | grep -o '"name": "[^"]*"' | cut -d'"' -f4 | grep -E '\.(7z|zip|tar\.gz|tar\.bz2)$' | grep -i "整合包")
              
         if [ -z "$packages" ]; then
-            echo -e "${RED}未找到任何整合包。${NC}"; read -n 1 -s -r; return
+            echo -e "${RED}未找到任何整合包。${NC}"
+            echo -e "${GREY}API 响应预览:${NC}"
+            echo "$content" | head -n 20
+            read -n 1 -s -r; return
         fi
         
         while IFS= read -r pkg; do
