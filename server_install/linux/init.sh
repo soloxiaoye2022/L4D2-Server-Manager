@@ -399,8 +399,15 @@ tui_menu() {
         local list_h=$((h - 8))
         if [ $list_h -lt 5 ]; then list_h=5; fi
         
+        # 优化: 如果传入的标题 $t 包含换行符，则将其视为 (Title, Text)
+        # 但 whiptail 只能接受一个 --title 和一个 text
+        # 我们使用全局变量 MENU_TITLE 作为 Box Title, $t 作为内部文本
+        # 如果 MENU_TITLE 未定义，则使用默认 M_TITLE
+        
+        local box_title="${MENU_TITLE:-$M_TITLE}"
+        
         local choice
-        choice=$(whiptail --title "$M_TITLE" --menu "$t" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
+        choice=$(whiptail --title "$box_title" --menu "$t" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
         
         if [ $? -eq 0 ]; then
             return $((choice-1))
@@ -1389,7 +1396,28 @@ control_panel() {
         local st=$(get_status "$n")
         local a_txt="$M_OPT_AUTO_ON"; if [ "$auto" == "true" ]; then a_txt="$M_OPT_AUTO_OFF"; fi
         
-        tui_menu "$M_MANAGE_TITLE $n [$st]" "$M_OPT_START" "$M_OPT_STOP" "$M_OPT_RESTART" "$M_OPT_UPDATE" "$M_OPT_CONSOLE" "$M_OPT_LOGS" "$M_OPT_TRAFFIC" "$M_OPT_ARGS" "$M_OPT_PLUGINS" "$a_txt" "$M_OPT_BACKUP" "$M_OPT_DELETE" "$M_RETURN"
+        # 优化: 获取实际运行端口
+        local real_port="N/A"
+        if [ "$st" == "RUNNING" ]; then
+             # 尝试通过 netstat 查找 ./srcds_run 的端口 (仅参考)
+             # 更准确的是从 run_guard.sh 中读取配置端口，或者检查 UDP 监听
+             # 这里简单显示配置端口 vs 实际监听
+             if command -v netstat >/dev/null 2>&1; then
+                 # 模糊匹配，可能不准确，仅作参考
+                 local check_port=$(netstat -ulnp 2>/dev/null | grep "srcds_linux" | awk '{print $4}' | awk -F: '{print $NF}' | sort -u | head -1)
+                 if [ -n "$check_port" ]; then real_port="$check_port"; fi
+             fi
+        fi
+        
+        # 读取 run_guard.sh 中的配置端口
+        local cfg_port=$(grep -oP "(?<=-port )\d+" "$p/run_guard.sh" | head -1)
+        if [ -z "$cfg_port" ]; then cfg_port="$port (Default)"; fi
+
+        local info_str="$n [$st]\n端口设置: $cfg_port | 实际运行: $real_port"
+        
+        # 设置 Box Title 为服务器名称，Text 为状态信息
+        MENU_TITLE="管理实例: $n" \
+        tui_menu "$info_str" "$M_OPT_START" "$M_OPT_STOP" "$M_OPT_RESTART" "$M_OPT_UPDATE" "$M_OPT_CONSOLE" "$M_OPT_LOGS" "$M_OPT_TRAFFIC" "$M_OPT_ARGS" "$M_OPT_PLUGINS" "$a_txt" "$M_OPT_BACKUP" "$M_OPT_DELETE" "$M_RETURN"
         case $? in
             0) start_srv "$n" "$p" "$port" ;;
             1) stop_srv "$n" ;;
@@ -1494,14 +1522,80 @@ view_log() {
 }
 
 edit_args() {
-    local s="$1/run_guard.sh"; local c=$(grep "./srcds_run" "$s")
-    tui_header; echo -e "$M_CURRENT $c\n$M_NEW_CMD"
-    read -e -i "$c" new
-    if [ -n "$new" ]; then
-        local esc=$(printf '%s\n' "$new" | sed 's:[][\/.^$*]:\\&:g')
-        sed -i "s|^\./srcds_run.*|$new|" "$s"; echo -e "$M_SAVED"
-    fi
-    sleep 1
+    local s="$1/run_guard.sh"
+    local c=$(grep "./srcds_run" "$s")
+    
+    while true; do
+        # Parse current values
+        local curr_port=$(echo "$c" | grep -oP "(?<=-port )\d+" || echo "N/A")
+        local curr_map=$(echo "$c" | grep -oP "(?<= \+map )[^ ]+" || echo "N/A")
+        local curr_max=$(echo "$c" | grep -oP "(?<= \+maxplayers )\d+" || echo "N/A")
+        local curr_tick=$(echo "$c" | grep -oP "(?<=-tickrate )\d+" || echo "N/A")
+        
+        MENU_TITLE="配置启动参数" \
+        tui_menu "当前启动指令:\n$c\n\n请选择要修改的参数:" \
+            "修改地图 (Current: $curr_map)" \
+            "修改端口 (Current: $curr_port)" \
+            "修改最大人数 (Current: $curr_max)" \
+            "修改 Tickrate (Current: $curr_tick)" \
+            "手动编辑完整指令 (Advanced)" \
+            "返回"
+            
+        case $? in
+            0) 
+                local new_val; tui_input "请输入新地图名称 (如 c2m1_highway):" "$curr_map" "new_val"
+                if [ -n "$new_val" ] && [ "$new_val" != "N/A" ]; then
+                    if [[ "$c" == *"+map"* ]]; then
+                        c=$(echo "$c" | sed "s/+map [^ ]*/+map $new_val/")
+                    else
+                        c="$c +map $new_val"
+                    fi
+                fi
+                ;;
+            1)
+                local new_val; tui_input "请输入新端口 (如 27015):" "$curr_port" "new_val"
+                if [ -n "$new_val" ] && [ "$new_val" != "N/A" ]; then
+                    if [[ "$c" == *"-port"* ]]; then
+                        c=$(echo "$c" | sed "s/-port [0-9]*/-port $new_val/")
+                    else
+                        c="$c -port $new_val"
+                    fi
+                fi
+                ;;
+            2)
+                local new_val; tui_input "请输入最大人数 (如 8):" "$curr_max" "new_val"
+                if [ -n "$new_val" ] && [ "$new_val" != "N/A" ]; then
+                    if [[ "$c" == *"+maxplayers"* ]]; then
+                        c=$(echo "$c" | sed "s/+maxplayers [0-9]*/+maxplayers $new_val/")
+                    else
+                        c="$c +maxplayers $new_val"
+                    fi
+                fi
+                ;;
+            3)
+                local new_val; tui_input "请输入 Tickrate (如 60/100):" "$curr_tick" "new_val"
+                if [ -n "$new_val" ] && [ "$new_val" != "N/A" ]; then
+                    if [[ "$c" == *"-tickrate"* ]]; then
+                        c=$(echo "$c" | sed "s/-tickrate [0-9]*/-tickrate $new_val/")
+                    else
+                        c="$c -tickrate $new_val"
+                    fi
+                fi
+                ;;
+            4)
+                tui_input "编辑完整指令:" "$c" "new_val"
+                if [ -n "$new_val" ]; then c="$new_val"; fi
+                ;;
+            5|255) break ;;
+        esac
+        
+        # Apply changes to file immediately
+        if [ -n "$c" ]; then
+            local esc=$(printf '%s\n' "$c" | sed 's:[][\/.^$*]:\\&:g')
+            sed -i "s|^\./srcds_run.*|$c|" "$s"
+        fi
+    done
+    echo -e "$M_SAVED"; sleep 1
 }
 
 toggle_auto() {
