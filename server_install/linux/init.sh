@@ -680,13 +680,29 @@ download_packages() {
     local cur=0; local start=0; local size=15; local tot=${#pkg_array[@]}
     
     tput civis; trap 'tput cnorm' EXIT
+    
+    # 首次绘制头部
+    tui_header; echo -e "${GREEN}$M_SELECT_PACKAGES${NC}\n$M_SELECT_HINT\n----------------------------------------"
+    
     while true; do
+        # 使用 tput cup 移动光标，避免 clear 造成的闪烁
+        # 注意: 这里假设 header + hint + separator 占用约 4-5 行。
+        # 为简单起见，我们还是重绘列表部分，但先尝试移动光标回列表起始位置
+        # 如果无法精确控制，退回到清屏重绘，但尝试优化显示
+        
+        # 简单优化: 仅在每次循环清屏重绘 (如果用户觉得闪，可能是 clear 导致)
+        # 尝试移除循环内的 tui_header 调用，改为手动覆盖
+        
         tui_header; echo -e "${GREEN}$M_SELECT_PACKAGES${NC}\n$M_SELECT_HINT\n----------------------------------------"
         local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
         for ((j=start;j<end;j++)); do
             local m="[ ]"; if [ "${sel[j]}" -eq 1 ]; then m="[x]"; fi
-            if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${pkg_array[j]}${NC}"; else echo -e "   $m ${pkg_array[j]}"; fi
+            # 清除行内余下内容，防止残留
+            local clr_eol=$(tput el)
+            if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${pkg_array[j]}${NC}${clr_eol}"; else echo -e "   $m ${pkg_array[j]}${clr_eol}"; fi
         done
+        # 清除列表下方的潜在残留行 (如果列表变短)
+        for ((j=end;j<start+size;j++)); do echo "$(tput el)"; done
         
         IFS= read -rsn1 k 2>/dev/null
         if [[ "$k" == "" ]]; then break;
@@ -699,6 +715,13 @@ download_packages() {
         elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
         elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
         fi
+        
+        # 修正: start 必须保证 cur 在 [start, start+size) 区间内
+        # 当 cur 循环回到 0 时，start 设为 0
+        # 当 cur 循环回到 last 时，start 设为 max(0, tot-size)
+        # 上面的逻辑处理了步进，但循环跳转需要额外检查
+        if [ $cur -lt $start ]; then start=$cur; fi
+        if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
     done
     tput cnorm
     
@@ -707,7 +730,15 @@ download_packages() {
     for ((j=0;j<tot;j++)); do
         if [ "${sel[j]}" -eq 1 ]; then
             local pkg="${pkg_array[j]}"
-            local dest="${pkg_dir}/${pkg}"
+            # 修正: 解压到单独的目录，避免文件混淆
+            local pkg_name_no_ext=$(basename "$pkg" .7z)
+            pkg_name_no_ext=$(basename "$pkg_name_no_ext" .zip)
+            pkg_name_no_ext=$(basename "$pkg_name_no_ext" .tar.gz)
+            
+            local extract_root="${pkg_dir}/${pkg_name_no_ext}"
+            mkdir -p "$extract_root"
+            
+            local dest="${extract_root}/${pkg}"
             local process_success=false
             
             if [ "$source_mode" == "network" ]; then
@@ -725,28 +756,43 @@ download_packages() {
                 local unzip_success=false
                 
                 # 解压尝试序列: 7z -> unzip -> tar
+                # 注意: 解压到 extract_root
                 if command -v 7z >/dev/null 2>&1; then
-                    if 7z x -y -o"${pkg_dir}" "$dest" >/dev/null 2>&1; then unzip_success=true; fi
+                    if 7z x -y -o"${extract_root}" "$dest" >/dev/null 2>&1; then unzip_success=true; fi
                 fi
                 
                 if [ "$unzip_success" = false ] && command -v unzip >/dev/null 2>&1; then
                     if file "$dest" | grep -q "Zip archive"; then
-                        if unzip -o "$dest" -d "${pkg_dir}" >/dev/null 2>&1; then unzip_success=true; fi
+                        if unzip -o "$dest" -d "${extract_root}" >/dev/null 2>&1; then unzip_success=true; fi
                     fi
                 fi
                 
                 if [ "$unzip_success" = false ] && command -v tar >/dev/null 2>&1; then
-                    if tar -xf "$dest" -C "${pkg_dir}" >/dev/null 2>&1; then unzip_success=true; fi
+                    if tar -xf "$dest" -C "${extract_root}" >/dev/null 2>&1; then unzip_success=true; fi
                 fi
                 
                 # 失败回显
                 if [ "$unzip_success" = false ] && command -v 7z >/dev/null 2>&1; then
                      echo -e "${YELLOW}解压失败，详细错误:${NC}"
-                     7z x -y -o"${pkg_dir}" "$dest"
+                     7z x -y -o"${extract_root}" "$dest"
                 fi
                 
                 if [ "$unzip_success" = true ]; then
                     echo -e "${GREEN}解压完成: ${pkg}${NC}"
+                    echo -e "${CYAN}文件已保存至: ${extract_root}${NC}"
+                    
+                    # 智能检测: 如果解压后包含 JS-MODS 目录，提示用户是否设为默认库
+                    if [ -d "${extract_root}/JS-MODS" ]; then
+                         JS_MODS_DIR="${extract_root}/JS-MODS"
+                         echo "${extract_root}/JS-MODS" > "$PLUGIN_CONFIG"
+                         echo -e "${GREEN}==> 已自动将插件库路径更新为: ${extract_root}/JS-MODS${NC}"
+                    elif [ -d "${extract_root}/addons" ]; then
+                         # 有些包可能直接是 addons 结构
+                         JS_MODS_DIR="${extract_root}"
+                         echo "${extract_root}" > "$PLUGIN_CONFIG"
+                         echo -e "${GREEN}==> 已自动将插件库路径更新为: ${extract_root}${NC}"
+                    fi
+                    
                     rm -f "$dest"
                     ((c++))
                 else
