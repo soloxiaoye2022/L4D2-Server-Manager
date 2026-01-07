@@ -316,6 +316,18 @@ CYAN='\033[36m'
 GREY='\033[90m'
 NC='\033[0m'
 
+# URL编码函数
+urlencode() {
+    local length="${#1}"
+    for (( i = 0; i < length; i++ )); do
+        local c="${1:i:1}"
+        case $c in
+            [a-zA-Z0-9.~_-]) printf "$c" ;;
+            *) printf '%%%02X' "'$c" ;;
+        esac
+    done
+}
+
 #=============================================================================
 # 0. 智能安装与更新模块
 #=============================================================================
@@ -395,7 +407,7 @@ self_update() {
 #=============================================================================
 check_deps() {
     local miss=()
-    local req=("tmux" "curl" "wget" "tar" "tree" "sed" "awk" "lsof" "7z" "unzip")
+    local req=("tmux" "curl" "wget" "tar" "tree" "sed" "awk" "lsof" "7z" "unzip" "file")
     for c in "${req[@]}"; do command -v "$c" >/dev/null 2>&1 || miss+=("$c"); done
     if [ ${#miss[@]} -eq 0 ]; then return 0; fi
     
@@ -1378,7 +1390,9 @@ download_packages() {
             
             if [ "$source_mode" == "network" ]; then
                 local repo="soloxiaoye2022/L4D2-Server-Manager"
-                local raw_url="https://raw.githubusercontent.com/${repo}/main/l4d2_plugins/${pkg}"
+                # 对文件名进行URL编码
+                local encoded_pkg=$(urlencode "$pkg")
+                local raw_url="https://raw.githubusercontent.com/${repo}/main/l4d2_plugins/${encoded_pkg}"
                 local proxy_url="https://gh-proxy.com/${raw_url}"
                 
                 echo -e "\n${CYAN}正在下载: ${pkg}${NC}"
@@ -1398,6 +1412,17 @@ download_packages() {
             fi
             
             if [ "$process_success" = true ]; then
+                # 校验文件大小 (防止下载到 HTML 错误页或 Git LFS 指针)
+                local fsize=$(wc -c < "$dest" 2>/dev/null || echo 0)
+                if [ "$fsize" -lt 102400 ]; then  # 小于 100KB
+                     echo -e "${RED}警告: 文件大小异常 (${fsize} bytes)，可能是下载失败或 Git LFS 指针。${NC}"
+                     echo -e "${YELLOW}文件前 10 行内容预览:${NC}"
+                     head -n 10 "$dest"
+                     echo -e "${YELLOW}建议检查 GitHub 仓库文件是否正确上传 (非 LFS 指针)。${NC}"
+                     rm -f "$dest"
+                     continue
+                fi
+
                 echo -e "${GREEN}获取成功: ${pkg}${NC}"
                 
                 # 解压整合包
