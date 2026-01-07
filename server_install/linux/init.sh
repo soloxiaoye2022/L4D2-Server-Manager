@@ -389,7 +389,7 @@ tui_menu() {
         for ((i=0; i<tot; i++)); do
             # 移除颜色代码 (兼容 literal \033 和 Escape char)
             local clean_opt=$(echo "${opts[i]}" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
-            args+=("$i" "${clean_opt}")
+            args+=("$((i+1))" "${clean_opt}")
         done
         
         local h=$(tput lines)
@@ -403,7 +403,7 @@ tui_menu() {
         choice=$(whiptail --title "$M_TITLE" --menu "$t" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
         
         if [ $? -eq 0 ]; then
-            return $choice
+            return $((choice-1))
         else
             return 255
         fi
@@ -415,12 +415,17 @@ tui_menu() {
         for ((i=0; i<tot; i++)); do
             # 兼容处理: 移除字符串中可能存在的非 ASCII 控制字符
             local display_opt=$(echo "${opts[i]}" | sed 's/\x1b\[[0-9;]*m//g')
-            if [ $i -eq $sel ]; then echo -e "${GREEN} -> ${display_opt} ${NC}"; else echo -e "    ${display_opt} "; fi
+            local idx=$((i+1))
+            if [ $i -eq $sel ]; then echo -e "${GREEN} -> $idx. ${display_opt} ${NC}"; else echo -e "    $idx. ${display_opt} "; fi
         done
         echo "----------------------------------------"
         read -rsn1 k 2>/dev/null
         case "$k" in
             "") tput cnorm; return $sel ;;
+            [1-9]) 
+                local target=$((k-1))
+                if [ $target -lt $tot ]; then tput cnorm; return $target; fi
+                ;;
             "A") ((sel--)); if [ $sel -lt 0 ]; then sel=$((tot-1)); fi ;;
             "B") ((sel++)); if [ $sel -ge $tot ]; then sel=0; fi ;;
             $'\x1b') 
@@ -1102,7 +1107,7 @@ set_plugin_repo() {
         for ((j=0;j<tot;j++)); do
             # 移除颜色代码
             local clean_name=$(echo "${pkg_list[j]}" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
-            args+=("$j" "${clean_name}")
+            args+=("$((j+1))" "${clean_name}")
         done
         
         local h=$(tput lines)
@@ -1117,7 +1122,7 @@ set_plugin_repo() {
                 choice=$(whiptail --title "$M_PLUG_REPO" --menu "$clean_hint" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
                 
                 if [ $? -ne 0 ]; then return; fi
-                cur=$choice
+                cur=$((choice-1))
             else
                 # Fallback to pure bash TUI
                 local start=0
@@ -1130,12 +1135,16 @@ set_plugin_repo() {
                     local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
                     for ((j=start;j<end;j++)); do
                         local clr_eol=$(tput el)
-                        if [ $j -eq $cur ]; then echo -e "${GREEN}-> [ ] ${pkg_list[j]}${NC}${clr_eol}"; else echo -e "   [ ] ${pkg_list[j]}${clr_eol}"; fi
+                        local idx=$((j+1))
+                        if [ $j -eq $cur ]; then echo -e "${GREEN}-> [ ] $idx. ${pkg_list[j]}${NC}${clr_eol}"; else echo -e "   [ ] $idx. ${pkg_list[j]}${clr_eol}"; fi
                     done
                     for ((j=end;j<start+size;j++)); do echo "$(tput el)"; done
                     
                     IFS= read -rsn1 k 2>/dev/null
                     if [[ "$k" == "" ]]; then break;
+                    elif [[ "$k" =~ [1-9] ]]; then
+                        local target=$((k-1))
+                        if [ $target -lt $tot ]; then cur=$target; break; fi
                     elif [[ "$k" == $'\x1b' ]]; then
                          read -rsn2 -t 0.1 r
                          if [[ "$r" == "[A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
