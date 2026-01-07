@@ -821,22 +821,44 @@ inst_plug() {
     if [ ${#ps[@]} -eq 0 ]; then echo "$M_REPO_EMPTY"; read -n 1 -s -r; return; fi
     
     local sel=(); for ((j=0;j<${#ps[@]};j++)); do sel[j]=0; done
-    local cur=0; local start=0; local size=15; local tot=${#ps[@]}
+    
+    # 动态计算分页大小
+    local term_lines=$(tput lines)
+    # 保留行: 头部(2) + Hint(2) + 边框(1) + 底部提示(1) = ~6行
+    local size=$((term_lines - 8))
+    if [ $size -lt 5 ]; then size=5; fi
+    
+    local cur=0; local start=0; local tot=${#ps[@]}
     
     tput civis; trap 'tput cnorm' EXIT
+    
+    # 首次绘制
+    tui_header; echo -e "$M_SELECT_HINT\n----------------------------------------"
+    
     while true; do
         tui_header; echo -e "$M_SELECT_HINT\n----------------------------------------"
         local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
         for ((j=start;j<end;j++)); do
             local m="[ ]"; if [ "${sel[j]}" -eq 1 ]; then m="[x]"; fi
-            if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${d[j]}${NC}"; else echo -e "   $m ${d[j]}"; fi
+            local clr_eol=$(tput el)
+            if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${d[j]}${NC}${clr_eol}"; else echo -e "   $m ${d[j]}${clr_eol}"; fi
         done
+        for ((j=end;j<start+size;j++)); do echo "$(tput el)"; done
+        
         IFS= read -rsn1 k 2>/dev/null
         if [[ "$k" == "" ]]; then break;
         elif [[ "$k" == " " ]]; then if [ "${sel[cur]}" -eq 0 ]; then sel[cur]=1; else sel[cur]=0; fi
+        elif [[ "$k" == $'\x1b' ]]; then
+             read -rsn2 -t 0.1 r
+             if [[ "$r" == "[A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
+             elif [[ "$r" == "[B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+             fi
         elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
         elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
         fi
+        
+        if [ $cur -lt $start ]; then start=$cur; fi
+        if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
     done
     tput cnorm
     
@@ -875,22 +897,42 @@ uninstall_plug() {
     if [ ${#ps[@]} -eq 0 ]; then echo -e "${YELLOW}No plugins installed${NC}"; read -n 1 -s -r; return; fi
     
     local sel=(); for ((j=0;j<${#ps[@]};j++)); do sel[j]=0; done
-    local cur=0; local start=0; local size=15; local tot=${#ps[@]}
+    
+    # 动态计算分页大小
+    local term_lines=$(tput lines)
+    local size=$((term_lines - 8))
+    if [ $size -lt 5 ]; then size=5; fi
+    
+    local cur=0; local start=0; local tot=${#ps[@]}
     
     tput civis; trap 'tput cnorm' EXIT
+    
+    tui_header; echo -e "$M_SELECT_HINT\n----------------------------------------"
+    
     while true; do
         tui_header; echo -e "$M_SELECT_HINT\n----------------------------------------"
         local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
         for ((j=start;j<end;j++)); do
             local m="[ ]"; if [ "${sel[j]}" -eq 1 ]; then m="[x]"; fi
-            if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${d[j]}${NC}"; else echo -e "   $m ${d[j]}"; fi
+            local clr_eol=$(tput el)
+            if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${d[j]}${NC}${clr_eol}"; else echo -e "   $m ${d[j]}${clr_eol}"; fi
         done
+        for ((j=end;j<start+size;j++)); do echo "$(tput el)"; done
+        
         IFS= read -rsn1 k 2>/dev/null
         if [[ "$k" == "" ]]; then break;
         elif [[ "$k" == " " ]]; then if [ "${sel[cur]}" -eq 0 ]; then sel[cur]=1; else sel[cur]=0; fi
+        elif [[ "$k" == $'\x1b' ]]; then
+             read -rsn2 -t 0.1 r
+             if [[ "$r" == "[A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
+             elif [[ "$r" == "[B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+             fi
         elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
         elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
         fi
+        
+        if [ $cur -lt $start ]; then start=$cur; fi
+        if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
     done
     tput cnorm
     
