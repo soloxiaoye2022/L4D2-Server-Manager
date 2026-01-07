@@ -261,8 +261,26 @@ download_file() {
             # 校验文件大小 (防止下载到 HTML 错误页或空文件)
             local fsize=$(wc -c < "$save_path" 2>/dev/null || echo 0)
             if [ "$fsize" -gt 1024 ]; then # 大于 1KB 认为有效
-                success=true
-                break
+                
+                # 进一步校验：如果是压缩包后缀，但文件类型是 text/html，说明下载了错误页面
+                local is_invalid_text=false
+                if [[ "$save_path" == *.7z || "$save_path" == *.zip || "$save_path" == *.tar* ]]; then
+                    if command -v file >/dev/null; then
+                        local mime_type=$(file -b --mime-type "$save_path" 2>/dev/null)
+                        if [[ "$mime_type" == text/* || "$mime_type" == "application/json" ]]; then
+                            is_invalid_text=true
+                            echo -e "${YELLOW}  警告: 下载的文件是文本 ($mime_type) 而非压缩包。${NC}"
+                            echo -e "${GREY}  内容预览: $(head -n 3 "$save_path")${NC}"
+                        fi
+                    fi
+                fi
+
+                if [ "$is_invalid_text" = false ]; then
+                    success=true
+                    break
+                else
+                    rm -f "$save_path"
+                fi
             else
                 echo -e "${YELLOW}  警告: 文件过小 ($fsize bytes)，尝试下一个源...${NC}"
                 rm -f "$save_path"
