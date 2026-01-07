@@ -874,7 +874,12 @@ uninstall_plug() {
 
 plugins_menu() {
     local p="$1"
-    if [ ! -d "$p/left4dead2" ]; then echo -e "$M_DIR_ERR"; read -n 1 -s -r; return; fi
+    # 修复：只检查基础目录，不强制要求 left4dead2 子目录存在 (可能尚未首次运行生成)
+    if [ ! -d "$p" ]; then echo -e "$M_DIR_ERR"; read -n 1 -s -r; return; fi
+    
+    # 确保 left4dead2 目录存在
+    mkdir -p "$p/left4dead2"
+    
     while true; do
         tui_menu "$M_OPT_PLUGINS" "$M_PLUG_INSTALL" "$M_PLUG_UNINSTALL" "$M_PLUG_PLAT" "$M_PLUG_REPO" "$M_RETURN"
         case $? in
