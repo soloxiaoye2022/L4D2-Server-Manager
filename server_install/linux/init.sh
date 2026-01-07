@@ -1471,9 +1471,12 @@ main() {
              fi
         fi
     fi
-    load_i18n $(cat "$CONFIG_FILE")
+    if [ -f "$CONFIG_FILE" ]; then
+        load_i18n $(cat "$CONFIG_FILE")
+    fi
     
-    select_mirror
+    # 移除启动时的 select_mirror 调用，仅在需要下载/更新时按需调用
+    # select_mirror
     
     if [[ "$INSTALL_TYPE" == "temp" ]]; then
         # 优先检测现有安装
@@ -1485,10 +1488,10 @@ main() {
         fi
         
         if [ -n "$exist_path" ]; then
-            echo -e "${GREEN}$M_FOUND_EXISTING${NC}"
-            sleep 1
-            exec "$exist_path" "$@"
-        fi
+        echo -e "${GREEN}$M_FOUND_EXISTING${NC}"
+        sleep 1
+        exec "$exist_path" "$@"
+    fi
 
         tui_header
         echo -e "${YELLOW}$M_WELCOME${NC}"
