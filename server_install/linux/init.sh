@@ -367,7 +367,9 @@ tui_menu() {
     while true; do
         tui_header; echo -e "${YELLOW}$t${NC}\n----------------------------------------"
         for ((i=0; i<tot; i++)); do
-            if [ $i -eq $sel ]; then echo -e "${GREEN} -> ${opts[i]} ${NC}"; else echo -e "    ${opts[i]} "; fi
+            # 兼容处理: 移除字符串中可能存在的非 ASCII 控制字符
+            local display_opt=$(echo "${opts[i]}" | sed 's/\x1b\[[0-9;]*m//g')
+            if [ $i -eq $sel ]; then echo -e "${GREEN} -> ${display_opt} ${NC}"; else echo -e "    ${display_opt} "; fi
         done
         echo "----------------------------------------"
         read -rsn1 k 2>/dev/null
