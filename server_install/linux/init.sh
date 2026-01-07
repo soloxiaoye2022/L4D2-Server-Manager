@@ -377,7 +377,12 @@ tui_menu() {
             "") tput cnorm; return $sel ;;
             "A") ((sel--)); if [ $sel -lt 0 ]; then sel=$((tot-1)); fi ;;
             "B") ((sel++)); if [ $sel -ge $tot ]; then sel=0; fi ;;
-            $'\x1b') read -rsn2 r 2>/dev/null; if [[ "$r" == "[A" ]]; then ((sel--)); fi; if [[ "$r" == "[B" ]]; then ((sel++)); fi ;;
+            $'\x1b') 
+                read -rsn2 -t 0.1 r 2>/dev/null
+                if [[ "$r" == "[A" ]]; then ((sel--)); if [ $sel -lt 0 ]; then sel=$((tot-1)); fi
+                elif [[ "$r" == "[B" ]]; then ((sel++)); if [ $sel -ge $tot ]; then sel=0; fi
+                elif [[ -z "$r" ]]; then tput cnorm; return 255; fi # ESC 返回
+                ;;
         esac
     done
 }
@@ -711,6 +716,7 @@ download_packages() {
              read -rsn2 -t 0.1 r
              if [[ "$r" == "[A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
              elif [[ "$r" == "[B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+             elif [[ -z "$r" ]]; then tput cnorm; return; fi
              fi
         elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
         elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
@@ -852,6 +858,7 @@ inst_plug() {
              read -rsn2 -t 0.1 r
              if [[ "$r" == "[A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
              elif [[ "$r" == "[B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+             elif [[ -z "$r" ]]; then tput cnorm; return; fi
              fi
         elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
         elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
@@ -938,6 +945,7 @@ uninstall_plug() {
              read -rsn2 -t 0.1 r
              if [[ "$r" == "[A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
              elif [[ "$r" == "[B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+             elif [[ -z "$r" ]]; then tput cnorm; return; fi
              fi
         elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
         elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
@@ -1001,7 +1009,11 @@ plugins_menu() {
     while true; do
         tui_menu "$M_OPT_PLUGINS" "$M_PLUG_INSTALL" "$M_PLUG_UNINSTALL" "$M_PLUG_PLAT" "$M_PLUG_REPO" "$M_RETURN"
         case $? in
-            0) inst_plug "$p" ;; 1) uninstall_plug "$p" ;; 2) inst_plat "$p" ;; 3) set_plugin_repo ;; 4) return ;;
+            0) inst_plug "$p" ;; 
+            1) uninstall_plug "$p" ;; 
+            2) inst_plat "$p" ;; 
+            3) set_plugin_repo ;; 
+            4|255) return ;;
         esac
     done
 }
@@ -1041,6 +1053,12 @@ set_plugin_repo() {
         
         IFS= read -rsn1 k 2>/dev/null
         if [[ "$k" == "" ]]; then break;
+        elif [[ "$k" == $'\x1b' ]]; then
+             read -rsn2 -t 0.1 r
+             if [[ "$r" == "[A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
+             elif [[ "$r" == "[B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+             elif [[ -z "$r" ]]; then tput cnorm; return; fi
+             fi
         elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
         elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
         fi
@@ -1258,6 +1276,7 @@ manage_menu() {
     if [ ${#srvs[@]} -eq 0 ]; then echo -e "$M_NO_INSTANCE"; read -n 1 -s -r; return; fi
     opts+=("$M_RETURN")
     tui_menu "$M_SELECT_INSTANCE" "${opts[@]}"; local c=$?
+    if [ $c -eq 255 ]; then return; fi
     if [ $c -lt ${#srvs[@]} ]; then control_panel "${srvs[$c]}"; fi
 }
 
@@ -1293,7 +1312,7 @@ control_panel() {
             9) toggle_auto "$n" "$line"; break ;; 
             10) backup_srv "$n" "$p" ;;
             11) if delete_srv "$n" "$p"; then return; fi ;;
-            12) return ;;
+            12|255) return ;;
         esac
     done
     control_panel "$n"
@@ -1599,7 +1618,7 @@ main() {
     while true; do
         tui_menu "$M_MAIN_MENU" "$M_DEPLOY" "$M_MANAGE" "$M_DOWNLOAD_PACKAGES" "$M_UPDATE" "$M_LANG" "$M_EXIT"
         case $? in
-            0) deploy_wizard ;; 1) manage_menu ;; 2) download_packages ;; 3) self_update ;; 4) change_lang ;; 5) exit 0 ;;
+            0) deploy_wizard ;; 1) manage_menu ;; 2) download_packages ;; 3) self_update ;; 4) change_lang ;; 5|255) exit 0 ;;
         esac
     done
 }
