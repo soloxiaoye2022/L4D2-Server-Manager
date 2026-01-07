@@ -169,31 +169,51 @@ select_best_mirror() {
     if [ -n "$BEST_MIRROR" ]; then return; fi
     
     echo -e "${YELLOW}正在优选最佳下载线路...${NC}"
+    # 使用一个小文件进行测速，例如 LICENSE
     local target_path="soloxiaoye2022/server_install/main/LICENSE"
-    local min_time=99999
+    local check_url="https://raw.githubusercontent.com/$target_path"
+    
+    local best_speed=0
     local best="DIRECT"
     
-    for m in "${MIRRORS[@]}"; do
-        local test_url=""
+    # 临时增加 DIRECT 到数组头部进行测试
+    local test_mirrors=("DIRECT" "${MIRRORS[@]}")
+    # 去重
+    local unique_mirrors=($(echo "${test_mirrors[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
+    
+    for m in "${unique_mirrors[@]}"; do
+        local test_target_url=""
         if [ "$m" == "DIRECT" ]; then
-            test_url="https://raw.githubusercontent.com/$target_path"
+            test_target_url="$check_url"
         else
-            test_url="${m}/https://raw.githubusercontent.com/$target_path"
+            test_target_url="${m}/${check_url}"
         fi
         
-        # 使用 HEAD 请求测速，超时时间 2秒
-        local start_ts=$(date +%s%N)
-        if curl -I -L --connect-timeout 2 -m 3 -s -o /dev/null "$test_url"; then
-            local end_ts=$(date +%s%N)
-            local duration=$(( (end_ts - start_ts) / 1000000 ))
-            echo -e "  [${GREEN}OK${NC}] $m - ${duration}ms"
+        # 测速: 获取 http_code 和 download_speed (B/s)
+        # 只有 HTTP 200 才算成功
+        local curl_output=$(curl -L -k --connect-timeout 2 -m 5 -o /dev/null -s -w "%{http_code}:%{speed_download}" "$test_target_url")
+        local status=$(echo "$curl_output" | cut -d: -f1)
+        local speed=$(echo "$curl_output" | cut -d: -f2 | cut -d. -f1)
+        
+        if [ "$status" -eq 200 ]; then
+            # 格式化速度
+            local speed_human=""
+            if [ "$speed" -gt 1048576 ]; then
+                speed_human="$((speed/1048576)) MB/s"
+            elif [ "$speed" -gt 1024 ]; then
+                speed_human="$((speed/1024)) KB/s"
+            else
+                speed_human="$speed B/s"
+            fi
             
-            if [ $duration -lt $min_time ]; then
-                min_time=$duration
+            echo -e "  [${GREEN}OK${NC}] $m - $speed_human"
+            
+            if [ "$speed" -gt "$best_speed" ]; then
+                best_speed=$speed
                 best=$m
             fi
         else
-            echo -e "  [${RED}Fail${NC}] $m - Timeout"
+            echo -e "  [${RED}Fail${NC}] $m - (HTTP $status)"
         fi
     done
     
@@ -212,7 +232,26 @@ download_file() {
     
     echo -e "${CYAN}正在下载: $desc${NC}"
     
-    # 构建尝试列表：优先 BEST_MIRROR，然后是其他所有镜像
+    # 准备目标 URL (raw)
+    local target_raw_url=""
+    local target_media_url="" # 用于 LFS
+    
+    if [[ "$git_path" == http* ]]; then
+        target_raw_url="$git_path"
+        # 如果是绝对路径，media URL 难以自动推导，除非解析 GitHub URL
+        target_media_url="$git_path" 
+    else
+        local dir_path=$(dirname "$git_path")
+        local filename=$(basename "$git_path")
+        local encoded_name=$(urlencode "$filename")
+        # 移除 ./ 前缀
+        if [[ "$dir_path" == "." ]]; then dir_path=""; else dir_path="${dir_path}/"; fi
+        
+        target_raw_url="https://raw.githubusercontent.com/${dir_path}${encoded_name}"
+        target_media_url="https://media.githubusercontent.com/media/${dir_path}${encoded_name}"
+    fi
+
+    # 构建尝试列表
     local try_list=("$BEST_MIRROR")
     for m in "${MIRRORS[@]}"; do
         if [ "$m" != "$BEST_MIRROR" ]; then try_list+=("$m"); fi
@@ -221,80 +260,93 @@ download_file() {
     local success=false
     
     for mirror in "${try_list[@]}"; do
-        local url=""
-        # URL 编码处理
-        # 1. 分离 path 中的目录和文件名
-        local dir_path=$(dirname "$git_path")
-        local filename=$(basename "$git_path")
-        # 2. 仅对文件名进行编码
-        local encoded_name=$(urlencode "$filename")
-        local encoded_path="${dir_path}/${encoded_name}"
+        local current_url=""
         
+        # 构造 URL
         if [ "$mirror" == "DIRECT" ]; then
-            url="https://raw.githubusercontent.com/$encoded_path"
+            current_url="$target_raw_url"
         else
-            # 代理模式下，通常需要完整的 raw url
-            url="${mirror}/https://raw.githubusercontent.com/$encoded_path"
+            current_url="${mirror}/${target_raw_url}"
         fi
         
-        # 打印调试信息 (响应用户要求)
-        echo -e "${GREY}  [Debug] URL: $url${NC}"
+        echo -e "${GREY}  [Debug] URL: $current_url${NC}"
         
-        # 执行下载
-        # -L: 跟随重定向
-        # -f: HTTP错误时不输出内容
-        # --retry 2: 重试2次
-        local dl_success=false
-        
-        # 1. 尝试 curl
-        if curl -L -f --retry 2 --connect-timeout 10 -m 600 -# "$url" -o "$save_path"; then
-            dl_success=true
+        # 下载尝试
+        local dl_ok=false
+        if curl -L -f --retry 2 --connect-timeout 10 -m 600 -# "$current_url" -o "$save_path"; then
+            dl_ok=true
         else
-            # 2. 尝试 wget (用户建议)
-            echo -e "${YELLOW}  curl 尝试失败，切换 wget...${NC}"
-            if wget --no-check-certificate -q --show-progress --tries=2 --timeout=10 -O "$save_path" "$url"; then
-                dl_success=true
+            echo -e "${YELLOW}  curl 失败，尝试 wget...${NC}"
+            if wget --no-check-certificate -q --show-progress --tries=2 --timeout=10 -O "$save_path" "$current_url"; then
+                dl_ok=true
             fi
         fi
-
-        if [ "$dl_success" = true ]; then
-            # 校验文件大小 (防止下载到 HTML 错误页或空文件)
+        
+        if [ "$dl_ok" = true ]; then
+            # 1. 检查是否为 LFS 指针 (小文件且包含 oid sha256)
             local fsize=$(wc -c < "$save_path" 2>/dev/null || echo 0)
-            if [ "$fsize" -gt 1024 ]; then # 大于 1KB 认为有效
+            if [ "$fsize" -lt 2048 ] && grep -q "oid sha256:" "$save_path"; then
+                echo -e "${YELLOW}  检测到 LFS 指针，尝试使用 media 链接...${NC}"
                 
-                # 进一步校验：如果是压缩包后缀，但文件类型是 text/html，说明下载了错误页面
-                local is_invalid_text=false
-                if [[ "$save_path" == *.7z || "$save_path" == *.zip || "$save_path" == *.tar* ]]; then
-                    if command -v file >/dev/null; then
-                        local mime_type=$(file -b --mime-type "$save_path" 2>/dev/null)
-                        if [[ "$mime_type" == text/* || "$mime_type" == "application/json" ]]; then
-                            is_invalid_text=true
-                            echo -e "${YELLOW}  警告: 下载的文件是文本 ($mime_type) 而非压缩包。${NC}"
-                            echo -e "${GREY}  内容预览: $(head -n 3 "$save_path")${NC}"
-                        fi
+                # 构造 media URL
+                local media_try_url=""
+                if [ "$mirror" == "DIRECT" ]; then
+                    media_try_url="$target_media_url"
+                else
+                    media_try_url="${mirror}/${target_media_url}"
+                fi
+                echo -e "${GREY}  [LFS Debug] URL: $media_try_url${NC}"
+                
+                if curl -L -f --retry 2 --connect-timeout 20 -m 1800 -# "$media_try_url" -o "$save_path"; then
+                    # 更新文件大小
+                    fsize=$(wc -c < "$save_path" 2>/dev/null || echo 0)
+                else
+                    echo -e "${RED}  LFS 文件下载失败。${NC}"
+                    dl_ok=false
+                fi
+            fi
+            
+            # 2. 检查是否为错误页面 (HTML)
+            if [ "$dl_ok" = true ] && [ "$fsize" -gt 1024 ]; then
+                 local is_html=false
+                 if command -v file >/dev/null; then
+                     local mime=$(file -b --mime-type "$save_path")
+                     if [[ "$mime" == text/html* ]]; then is_html=true; fi
+                 fi
+                 # 简单文本检查
+                 if [ "$is_html" = false ] && head -n 1 "$save_path" | grep -qi "<!DOCTYPE html"; then is_html=true; fi
+                 
+                 if [ "$is_html" = true ]; then
+                     echo -e "${YELLOW}  警告: 下载的是 HTML 页面，非有效文件。${NC}"
+                     dl_ok=false
+                 fi
+            fi
+            
+            # 3. 完整性校验 (可选)
+            if [ "$dl_ok" = true ] && [ "$fsize" -gt 1024 ]; then
+                if [[ "$save_path" == *.zip ]]; then
+                    if command -v unzip >/dev/null && ! unzip -tq "$save_path" >/dev/null 2>&1; then
+                         echo -e "${YELLOW}  ZIP 校验失败。${NC}"
+                         dl_ok=false
+                    fi
+                elif [[ "$save_path" == *.7z ]]; then
+                    if command -v 7z >/dev/null && ! 7z t "$save_path" >/dev/null 2>&1; then
+                         echo -e "${YELLOW}  7z 校验失败。${NC}"
+                         dl_ok=false
                     fi
                 fi
-
-                if [ "$is_invalid_text" = false ]; then
-                    success=true
-                    break
-                else
-                    rm -f "$save_path"
-                fi
+            fi
+            
+            if [ "$dl_ok" = true ] && [ "$fsize" -gt 1024 ]; then
+                success=true
+                break
             else
-                echo -e "${YELLOW}  警告: 文件过小 ($fsize bytes)，尝试下一个源...${NC}"
                 rm -f "$save_path"
             fi
         fi
     done
     
-    if [ "$success" = true ]; then
-        return 0
-    else
-        echo -e "${RED}下载失败: 所有镜像源均无法连接。${NC}"
-        rm -f "$save_path"
-        return 1
-    fi
+    if [ "$success" = true ]; then return 0; else echo -e "${RED}下载失败。${NC}"; return 1; fi
 }
 
 #=============================================================================
