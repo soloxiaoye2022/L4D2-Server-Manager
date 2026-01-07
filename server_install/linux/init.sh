@@ -387,7 +387,9 @@ tui_menu() {
     if command -v whiptail >/dev/null 2>&1; then
         local args=()
         for ((i=0; i<tot; i++)); do
-            args+=("$i" "${opts[i]}")
+            # 移除颜色代码
+            local clean_opt=$(echo "${opts[i]}" | sed 's/\x1b\[[0-9;]*m//g')
+            args+=("$i" "${clean_opt}")
         done
         
         local h=$(tput lines)
@@ -728,7 +730,9 @@ download_packages() {
     if command -v whiptail >/dev/null 2>&1; then
         local args=()
         for ((j=0;j<${#pkg_array[@]};j++)); do
-            args+=("${pkg_array[j]}" "" "OFF")
+            # 移除颜色代码
+            local clean_name=$(echo "${pkg_array[j]}" | sed 's/\x1b\[[0-9;]*m//g')
+            args+=("${clean_name}" "" "OFF")
         done
         
         local h=$(tput lines)
@@ -738,8 +742,8 @@ download_packages() {
         local list_h=$((h - 8))
         if [ $list_h -lt 5 ]; then list_h=5; fi
         
-        local choices
-        choices=$(whiptail --title "$M_SELECT_PACKAGES" --checklist "$M_SELECT_HINT" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
+        local clean_hint=$(echo "$M_SELECT_HINT" | sed 's/\x1b\[[0-9;]*m//g')
+        choices=$(whiptail --title "$M_SELECT_PACKAGES" --checklist "$clean_hint" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
         
         if [ $? -ne 0 ]; then return; fi
         
@@ -904,7 +908,9 @@ inst_plug() {
     if command -v whiptail >/dev/null 2>&1; then
         local args=()
         for ((j=0;j<tot;j++)); do
-            args+=("${d[j]}" "" "OFF")
+            # 移除颜色代码
+            local clean_name=$(echo "${d[j]}" | sed 's/\x1b\[[0-9;]*m//g')
+            args+=("${clean_name}" "" "OFF")
         done
         
         local h=$(tput lines)
@@ -914,8 +920,8 @@ inst_plug() {
         local list_h=$((h - 8))
         if [ $list_h -lt 5 ]; then list_h=5; fi
         
-        local choices
-        choices=$(whiptail --title "$M_PLUG_INSTALL" --checklist "$M_SELECT_HINT" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
+        local clean_hint=$(echo "$M_SELECT_HINT" | sed 's/\x1b\[[0-9;]*m//g')
+        choices=$(whiptail --title "$M_PLUG_INSTALL" --checklist "$clean_hint" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
         
         if [ $? -ne 0 ]; then return; fi
         
@@ -933,10 +939,13 @@ inst_plug() {
         # Re-do args with index as tag for reliability
         args=()
         for ((j=0;j<tot;j++)); do
-            args+=("$j" "${d[j]}" "OFF")
+            # 移除颜色代码
+            local clean_name=$(echo "${d[j]}" | sed 's/\x1b\[[0-9;]*m//g')
+            args+=("$j" "${clean_name}" "OFF")
         done
         
-        choices=$(whiptail --title "$M_PLUG_INSTALL" --checklist "$M_SELECT_HINT" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
+        local clean_hint=$(echo "$M_SELECT_HINT" | sed 's/\x1b\[[0-9;]*m//g')
+        choices=$(whiptail --title "$M_PLUG_INSTALL" --checklist "$clean_hint" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
         if [ $? -ne 0 ]; then return; fi
         
         choices="${choices//\"/}"
@@ -1038,7 +1047,9 @@ uninstall_plug() {
     if command -v whiptail >/dev/null 2>&1; then
         local args=()
         for ((j=0;j<tot;j++)); do
-            args+=("$j" "${ps[j]}" "OFF")
+            # 移除颜色代码
+            local clean_name=$(echo "${ps[j]}" | sed 's/\x1b\[[0-9;]*m//g')
+            args+=("$j" "${clean_name}" "OFF")
         done
         
         local h=$(tput lines)
@@ -1049,7 +1060,8 @@ uninstall_plug() {
         if [ $list_h -lt 5 ]; then list_h=5; fi
         
         local choices
-        choices=$(whiptail --title "$M_PLUG_UNINSTALL" --checklist "$M_SELECT_HINT" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
+        local clean_hint=$(echo "$M_SELECT_HINT" | sed 's/\x1b\[[0-9;]*m//g')
+        choices=$(whiptail --title "$M_PLUG_UNINSTALL" --checklist "$clean_hint" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
         if [ $? -ne 0 ]; then return; fi
         
         choices="${choices//\"/}"
@@ -1184,12 +1196,14 @@ set_plugin_repo() {
             local tot=${#pkg_list[@]}
             
             if command -v whiptail >/dev/null 2>&1; then
-                local args=()
-                for ((j=0;j<tot;j++)); do
-                    args+=("$j" "${pkg_list[j]}")
-                done
-                
-                local h=$(tput lines)
+        local args=()
+        for ((j=0;j<tot;j++)); do
+            # 移除颜色代码
+            local clean_name=$(echo "${pkg_list[j]}" | sed 's/\x1b\[[0-9;]*m//g')
+            args+=("$j" "${clean_name}")
+        done
+        
+        local h=$(tput lines)
                 local w=$(tput cols)
                 if [ $h -gt 25 ]; then h=25; fi
                 if [ $w -gt 80 ]; then w=80; fi
@@ -1197,7 +1211,8 @@ set_plugin_repo() {
                 if [ $list_h -lt 5 ]; then list_h=5; fi
                 
                 local choice
-                choice=$(whiptail --title "$M_PLUG_REPO" --menu "$M_SELECT_HINT" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
+                local clean_hint=$(echo "$M_SELECT_HINT" | sed 's/\x1b\[[0-9;]*m//g')
+                choice=$(whiptail --title "$M_PLUG_REPO" --menu "$clean_hint" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
                 
                 if [ $? -ne 0 ]; then return; fi
                 cur=$choice
