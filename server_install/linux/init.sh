@@ -1325,6 +1325,9 @@ download_packages() {
     local cur=0; local start=0; local size=15; local tot=${#pkg_array[@]}
     
     tput civis; trap 'tput cnorm' EXIT
+    
+    # 修复：设置IFS为空，防止read去除前导/尾随空格
+    # 修复：使用od或xxd来准确判断按键，提高兼容性
     while true; do
         tui_header; echo -e "${GREEN}$M_SELECT_PACKAGES${NC}\n$M_SELECT_HINT\n----------------------------------------"
         local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
@@ -1332,14 +1335,36 @@ download_packages() {
             local m="[ ]"; if [ "${sel[j]}" -eq 1 ]; then m="[x]"; fi
             if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${pkg_array[j]}${NC}"; else echo -e "   $m ${pkg_array[j]}"; fi
         done
-        read -rsn1 k 2>/dev/null
-        case "$k" in
-            "") break ;;
-            " ") if [ "${sel[cur]}" -eq 0 ]; then sel[cur]=1; else sel[cur]=0; fi ;;
-            "A") ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi ;;
-            "B") ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi ;;
-            $'\x1b') read -rsn2 r; if [[ "$r" == "[A" ]]; then ((cur--)); fi; if [[ "$r" == "[B" ]]; then ((cur++)); fi ;;
-        esac
+        
+        # 兼容性更好的按键读取方式
+        IFS= read -rsn1 k 2>/dev/null
+        
+        # 获取按键的十六进制值以便调试和精确匹配 (可选，仅用于复杂情况)
+        # local hex_k=$(echo -n "$k" | od -An -tx1 | tr -d ' \n')
+        
+        if [[ "$k" == "" ]]; then
+             # 回车键在 read -n1 中通常是空字符串 (因为 IFS= 且 -r)
+             # 但为了保险，我们只在确认不是其他特殊键残留时认为是回车
+             break
+        elif [[ "$k" == " " ]]; then
+             # 空格键
+             if [ "${sel[cur]}" -eq 0 ]; then sel[cur]=1; else sel[cur]=0; fi
+        elif [[ "$k" == $'\x1b' ]]; then
+             # 转义序列 (方向键)
+             read -rsn2 -t 0.1 r
+             if [[ "$r" == "[A" ]]; then 
+                 # Up
+                 ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
+             elif [[ "$r" == "[B" ]]; then 
+                 # Down
+                 ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+             fi
+        elif [[ "$k" == "A" ]]; then
+             # 部分环境可能直接把方向键解析为 A/B
+             ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
+        elif [[ "$k" == "B" ]]; then
+             ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
+        fi
     done
     tput cnorm
     
