@@ -387,15 +387,15 @@ tui_menu() {
     if command -v whiptail >/dev/null 2>&1; then
         local args=()
         for ((i=0; i<tot; i++)); do
-            # 移除颜色代码
-            local clean_opt=$(echo "${opts[i]}" | sed 's/\x1b\[[0-9;]*m//g')
+            # 移除颜色代码 (兼容 literal \033 和 Escape char)
+            local clean_opt=$(echo "${opts[i]}" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
             args+=("$i" "${clean_opt}")
         done
         
         local h=$(tput lines)
         local w=$(tput cols)
-        if [ $h -gt 25 ]; then h=25; fi
-        if [ $w -gt 80 ]; then w=80; fi
+        if [ $h -gt 35 ]; then h=35; fi
+        if [ $w -gt 160 ]; then w=160; fi
         local list_h=$((h - 8))
         if [ $list_h -lt 5 ]; then list_h=5; fi
         
@@ -731,18 +731,18 @@ download_packages() {
         local args=()
         for ((j=0;j<${#pkg_array[@]};j++)); do
             # 移除颜色代码
-            local clean_name=$(echo "${pkg_array[j]}" | sed 's/\x1b\[[0-9;]*m//g')
+            local clean_name=$(echo "${pkg_array[j]}" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
             args+=("${clean_name}" "" "OFF")
         done
         
         local h=$(tput lines)
         local w=$(tput cols)
-        if [ $h -gt 25 ]; then h=25; fi
-        if [ $w -gt 80 ]; then w=80; fi
+        if [ $h -gt 35 ]; then h=35; fi
+        if [ $w -gt 160 ]; then w=160; fi
         local list_h=$((h - 8))
         if [ $list_h -lt 5 ]; then list_h=5; fi
         
-        local clean_hint=$(echo "$M_SELECT_HINT" | sed 's/\x1b\[[0-9;]*m//g')
+        local clean_hint=$(echo "$M_SELECT_HINT" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
         choices=$(whiptail --title "$M_SELECT_PACKAGES" --checklist "$clean_hint" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
         
         if [ $? -ne 0 ]; then return; fi
@@ -887,93 +887,87 @@ download_packages() {
     echo -e "\n${GREEN}处理完成，共成功 ${c} 个包${NC}"; read -n 1 -s -r
 }
 
-inst_plug() {
+manage_plugins() {
     local t="$1/left4dead2"
     local rec_dir="$1/.plugin_records"
     
     if [ ! -d "$JS_MODS_DIR" ]; then echo -e "$M_REPO_NOT_FOUND $JS_MODS_DIR"; read -n 1 -s -r; return; fi
     mkdir -p "$rec_dir"
     
-    local ps=(); local d=()
+    # 1. Gather all available plugins
+    local available_plugins=()
     while IFS= read -r -d '' dir; do
-        local n=$(basename "$dir")
-        if [ -f "$rec_dir/$n" ]; then ps+=("$n"); d+=("$n $M_INSTALLED"); else ps+=("$n"); d+=("$n"); fi
+        available_plugins+=("$(basename "$dir")")
     done < <(find "$JS_MODS_DIR" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
     
-    if [ ${#ps[@]} -eq 0 ]; then echo "$M_REPO_EMPTY"; read -n 1 -s -r; return; fi
+    if [ ${#available_plugins[@]} -eq 0 ]; then echo "$M_REPO_EMPTY"; read -n 1 -s -r; return; fi
     
-    local tot=${#ps[@]}
-    local sel=(); for ((j=0;j<tot;j++)); do sel[j]=0; done
+    # 2. Check installed status
+    local installed_status=() # 1 for installed, 0 for not
     
+    for plug in "${available_plugins[@]}"; do
+        if [ -f "$rec_dir/$plug" ]; then
+            installed_status+=(1)
+        else
+            installed_status+=(0)
+        fi
+    done
+    
+    local tot=${#available_plugins[@]}
+    local choices=""
+    local new_selection=()
+    
+    # 3. Show Checklist
     if command -v whiptail >/dev/null 2>&1; then
         local args=()
-        for ((j=0;j<tot;j++)); do
-            # 移除颜色代码
-            local clean_name=$(echo "${d[j]}" | sed 's/\x1b\[[0-9;]*m//g')
-            args+=("${clean_name}" "" "OFF")
+        for ((i=0; i<tot; i++)); do
+             # Strip colors for whiptail
+             local clean_name=$(echo "${available_plugins[i]}" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
+             local status="OFF"
+             if [ "${installed_status[i]}" -eq 1 ]; then status="ON"; fi
+             args+=("$i" "$clean_name" "$status")
         done
         
         local h=$(tput lines)
         local w=$(tput cols)
-        if [ $h -gt 25 ]; then h=25; fi
-        if [ $w -gt 80 ]; then w=80; fi
+        if [ $h -gt 35 ]; then h=35; fi
+        if [ $w -gt 160 ]; then w=160; fi
         local list_h=$((h - 8))
         if [ $list_h -lt 5 ]; then list_h=5; fi
         
-        local clean_hint=$(echo "$M_SELECT_HINT" | sed 's/\x1b\[[0-9;]*m//g')
-        choices=$(whiptail --title "$M_PLUG_INSTALL" --checklist "$clean_hint" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
+        local clean_hint=$(echo "$M_SELECT_HINT" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
+        # Use index as tag to avoid issues with spaces/special chars in names
+        choices=$(whiptail --title "$M_PLUG_MANAGE" --checklist "$clean_hint" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
         
         if [ $? -ne 0 ]; then return; fi
         
+        # Process choices
         choices="${choices//\"/}"
-        for choice in $choices; do
-            for ((j=0;j<tot;j++)); do
-                # whiptail returns the TAG (first col), which we set to ${d[j]}
-                # But ${d[j]} might contain spaces (e.g. "plugin [Installed]")
-                # whiptail handles tags with spaces if quoted, but our parsing above might be fragile if tags contain spaces.
-                # BETTER: Use index as tag.
-                :
-            done
-        done
         
-        # Re-do args with index as tag for reliability
-        args=()
-        for ((j=0;j<tot;j++)); do
-            # 移除颜色代码
-            local clean_name=$(echo "${d[j]}" | sed 's/\x1b\[[0-9;]*m//g')
-            args+=("$j" "${clean_name}" "OFF")
-        done
-        
-        local clean_hint=$(echo "$M_SELECT_HINT" | sed 's/\x1b\[[0-9;]*m//g')
-        choices=$(whiptail --title "$M_PLUG_INSTALL" --checklist "$clean_hint" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
-        if [ $? -ne 0 ]; then return; fi
-        
-        choices="${choices//\"/}"
+        for ((i=0; i<tot; i++)); do new_selection[i]=0; done
         for idx in $choices; do
-            sel[$idx]=1
+            new_selection[$idx]=1
         done
         
     else
         # Fallback to pure bash TUI
+        local sel=("${installed_status[@]}")
         local cur=0; local start=0; 
-        
-        # 动态计算分页大小
-        local term_lines=$(tput lines)
-        local size=$((term_lines - 8))
+        local size=$(($(tput lines) - 8))
         if [ $size -lt 5 ]; then size=5; fi
         
         tput civis; trap 'tput cnorm' EXIT
         
-        # 首次绘制
-        tui_header; echo -e "$M_SELECT_HINT\n----------------------------------------"
-        
         while true; do
-            tui_header; echo -e "$M_SELECT_HINT\n----------------------------------------"
+            tui_header; echo -e "$M_PLUG_MANAGE\n$M_SELECT_HINT\n----------------------------------------"
             local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
             for ((j=start;j<end;j++)); do
                 local m="[ ]"; if [ "${sel[j]}" -eq 1 ]; then m="[x]"; fi
+                local status_mark=""
+                if [ "${installed_status[j]}" -eq 1 ]; then status_mark="*"; fi
+                
                 local clr_eol=$(tput el)
-                if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${d[j]}${NC}${clr_eol}"; else echo -e "   $m ${d[j]}${clr_eol}"; fi
+                if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${available_plugins[j]}${status_mark}${NC}${clr_eol}"; else echo -e "   $m ${available_plugins[j]}${status_mark}${clr_eol}"; fi
             done
             for ((j=end;j<start+size;j++)); do echo "$(tput el)"; done
             
@@ -993,161 +987,70 @@ inst_plug() {
             if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
         done
         tput cnorm
+        
+        new_selection=("${sel[@]}")
     fi
     
-    # 统计选中数量
-    local total_selected=0
-    for ((j=0;j<tot;j++)); do
-        if [ "${sel[j]}" -eq 1 ]; then ((total_selected++)); fi
-    done
+    # 4. Execute Changes
+    local to_install=()
+    local to_uninstall=()
     
-    if [ $total_selected -eq 0 ]; then return; fi
-    
-    echo -e "\n${CYAN}开始安装 $total_selected 个插件...${NC}"
-    
-    local c=0
-    for ((j=0;j<tot;j++)); do
-        if [ "${sel[j]}" -eq 1 ]; then 
-            ((c++))
-            echo -e "[${c}/${total_selected}] ${GREEN}正在安装: ${ps[j]}${NC}"
-            
-            local plugin_dir="${JS_MODS_DIR}/${ps[j]}"
-            local rec_file="$rec_dir/${ps[j]}"
-            > "$rec_file"
-            
-            while IFS= read -r -d '' file; do
-                if [ -f "$file" ]; then
-                    local rel_path=${file#"$plugin_dir/"}
-                    local dest="$t/$rel_path"
-                    mkdir -p "$(dirname "$dest")"
-                    cp -f "$file" "$dest" 2>/dev/null
-                    echo "$rel_path" >> "$rec_file"
-                fi
-            done < <(find "$plugin_dir" -type f -print0 | sort -z)
+    for ((i=0; i<tot; i++)); do
+        if [ "${installed_status[i]}" -eq 0 ] && [ "${new_selection[i]}" -eq 1 ]; then
+            to_install+=("${available_plugins[i]}")
+        elif [ "${installed_status[i]}" -eq 1 ] && [ "${new_selection[i]}" -eq 0 ]; then
+            to_uninstall+=("${available_plugins[i]}")
         fi
     done
-    echo -e "$M_DONE $c"; read -n 1 -s -r
+    
+    if [ ${#to_install[@]} -eq 0 ] && [ ${#to_uninstall[@]} -eq 0 ]; then return; fi
+    
+    echo -e "\n${CYAN}正在应用变更...${NC}"
+    
+    # Install
+    for plug in "${to_install[@]}"; do
+        echo -e "${GREEN}[安装] $plug${NC}"
+        local plugin_dir="${JS_MODS_DIR}/${plug}"
+        local rec_file="$rec_dir/${plug}"
+        > "$rec_file"
+        
+        while IFS= read -r -d '' file; do
+            if [ -f "$file" ]; then
+                local rel_path=${file#"$plugin_dir/"}
+                local dest="$t/$rel_path"
+                mkdir -p "$(dirname "$dest")"
+                cp -f "$file" "$dest" 2>/dev/null
+                echo "$rel_path" >> "$rec_file"
+            fi
+        done < <(find "$plugin_dir" -type f -print0 | sort -z)
+    done
+    
+    # Uninstall
+    for plug in "${to_uninstall[@]}"; do
+        echo -e "${YELLOW}[卸载] $plug${NC}"
+        local rec_file="$rec_dir/${plug}"
+        if [ -f "$rec_file" ]; then
+            local dirs_to_clean=()
+            while IFS= read -r file_path; do
+                if [ -n "$file_path" ]; then
+                    local full_path="$t/$file_path"
+                    if [ -f "$full_path" ]; then rm -f "$full_path" 2>/dev/null; fi
+                    dirs_to_clean+=("$(dirname "$full_path")")
+                fi
+            done < "$rec_file"
+            
+            local sorted_dirs=($(printf "%s\n" "${dirs_to_clean[@]}" | sort -u -r))
+            for d_path in "${sorted_dirs[@]}"; do
+                if [[ "$d_path" == "$t"* ]] && [ -d "$d_path" ]; then rmdir -p --ignore-fail-on-non-empty "$d_path" 2>/dev/null; fi
+            done
+            rm -f "$rec_file"
+        fi
+    done
+    
+    echo -e "$M_DONE"; read -n 1 -s -r
 }
 
-uninstall_plug() {
-    local t="$1/left4dead2"
-    local rec_dir="$1/.plugin_records"
-    mkdir -p "$rec_dir"
-    
-    local ps=(); local d=()
-    for rec_file in "$rec_dir"/*; do
-        if [ -f "$rec_file" ]; then local n=$(basename "$rec_file"); ps+=("$n"); d+=("$n"); fi
-    done
-    
-    if [ ${#ps[@]} -eq 0 ]; then echo -e "${YELLOW}No plugins installed${NC}"; read -n 1 -s -r; return; fi
-    
-    local tot=${#ps[@]}
-    local sel=(); for ((j=0;j<tot;j++)); do sel[j]=0; done
-    
-    if command -v whiptail >/dev/null 2>&1; then
-        local args=()
-        for ((j=0;j<tot;j++)); do
-            # 移除颜色代码
-            local clean_name=$(echo "${ps[j]}" | sed 's/\x1b\[[0-9;]*m//g')
-            args+=("$j" "${clean_name}" "OFF")
-        done
-        
-        local h=$(tput lines)
-        local w=$(tput cols)
-        if [ $h -gt 25 ]; then h=25; fi
-        if [ $w -gt 80 ]; then w=80; fi
-        local list_h=$((h - 8))
-        if [ $list_h -lt 5 ]; then list_h=5; fi
-        
-        local choices
-        local clean_hint=$(echo "$M_SELECT_HINT" | sed 's/\x1b\[[0-9;]*m//g')
-        choices=$(whiptail --title "$M_PLUG_UNINSTALL" --checklist "$clean_hint" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
-        if [ $? -ne 0 ]; then return; fi
-        
-        choices="${choices//\"/}"
-        for idx in $choices; do
-            sel[$idx]=1
-        done
-        
-    else
-        # Fallback to pure bash TUI
-        local cur=0; local start=0; 
-        
-        # 动态计算分页大小
-        local term_lines=$(tput lines)
-        local size=$((term_lines - 8))
-        if [ $size -lt 5 ]; then size=5; fi
-        
-        tput civis; trap 'tput cnorm' EXIT
-        
-        # 首次绘制
-        tui_header; echo -e "$M_SELECT_HINT\n----------------------------------------"
-        
-        while true; do
-            tui_header; echo -e "$M_SELECT_HINT\n----------------------------------------"
-            local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
-            for ((j=start;j<end;j++)); do
-                local m="[ ]"; if [ "${sel[j]}" -eq 1 ]; then m="[x]"; fi
-                local clr_eol=$(tput el)
-                if [ $j -eq $cur ]; then echo -e "${GREEN}-> $m ${d[j]}${NC}${clr_eol}"; else echo -e "   $m ${d[j]}${clr_eol}"; fi
-            done
-            for ((j=end;j<start+size;j++)); do echo "$(tput el)"; done
-            
-            IFS= read -rsn1 k 2>/dev/null
-            if [[ "$k" == "" ]]; then break;
-            elif [[ "$k" == " " ]]; then if [ "${sel[cur]}" -eq 0 ]; then sel[cur]=1; else sel[cur]=0; fi
-            elif [[ "$k" == $'\x1b' ]]; then
-                 read -rsn2 -t 0.1 r
-                 if [[ "$r" == "[A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
-                 elif [[ "$r" == "[B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
-                 elif [[ -z "$r" ]]; then tput cnorm; return; fi
-            elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
-            elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
-            fi
-            
-            if [ $cur -lt $start ]; then start=$cur; fi
-            if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
-        done
-        tput cnorm
-    fi
-    
-    # 统计选中数量
-    local total_selected=0
-    for ((j=0;j<tot;j++)); do
-        if [ "${sel[j]}" -eq 1 ]; then ((total_selected++)); fi
-    done
-    
-    if [ $total_selected -eq 0 ]; then return; fi
-    
-    echo -e "\n${CYAN}开始卸载 $total_selected 个插件...${NC}"
-    
-    local c=0
-    for ((j=0;j<tot;j++)); do
-        if [ "${sel[j]}" -eq 1 ]; then 
-            ((c++))
-            echo -e "[${c}/${total_selected}] ${YELLOW}正在卸载: ${ps[j]}${NC}"
-            
-            local rec_file="$rec_dir/${ps[j]}"
-            if [ -f "$rec_file" ]; then
-                local dirs_to_clean=()
-                while IFS= read -r file_path; do
-                    if [ -n "$file_path" ]; then
-                        local full_path="$t/$file_path"
-                        if [ -f "$full_path" ]; then rm -f "$full_path" 2>/dev/null; fi
-                        dirs_to_clean+=("$(dirname "$full_path")")
-                    fi
-                done < "$rec_file"
-                
-                local sorted_dirs=($(printf "%s\n" "${dirs_to_clean[@]}" | sort -u -r))
-                for d_path in "${sorted_dirs[@]}"; do
-                    if [[ "$d_path" == "$t"* ]] && [ -d "$d_path" ]; then rmdir -p --ignore-fail-on-non-empty "$d_path" 2>/dev/null; fi
-                done
-                rm -f "$rec_file"
-            fi
-        fi
-    done
-    echo -e "$M_DONE $c"; read -n 1 -s -r
-}
+
 
 plugins_menu() {
     local p="$1"
@@ -1162,13 +1065,12 @@ plugins_menu() {
     mkdir -p "$p/left4dead2"
     
     while true; do
-        tui_menu "$M_OPT_PLUGINS" "$M_PLUG_INSTALL" "$M_PLUG_UNINSTALL" "$M_PLUG_PLAT" "$M_PLUG_REPO" "$M_RETURN"
+        tui_menu "$M_OPT_PLUGINS" "$M_PLUG_MANAGE" "$M_PLUG_PLAT" "$M_PLUG_REPO" "$M_RETURN"
         case $? in
-            0) inst_plug "$p" ;; 
-            1) uninstall_plug "$p" ;; 
-            2) inst_plat "$p" ;; 
-            3) set_plugin_repo ;; 
-            4|255) return ;;
+            0) manage_plugins "$p" ;; 
+            1) inst_plat "$p" ;; 
+            2) set_plugin_repo ;; 
+            3|255) return ;;
         esac
     done
 }
@@ -1199,19 +1101,19 @@ set_plugin_repo() {
         local args=()
         for ((j=0;j<tot;j++)); do
             # 移除颜色代码
-            local clean_name=$(echo "${pkg_list[j]}" | sed 's/\x1b\[[0-9;]*m//g')
+            local clean_name=$(echo "${pkg_list[j]}" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
             args+=("$j" "${clean_name}")
         done
         
         local h=$(tput lines)
                 local w=$(tput cols)
-                if [ $h -gt 25 ]; then h=25; fi
-                if [ $w -gt 80 ]; then w=80; fi
+                if [ $h -gt 35 ]; then h=35; fi
+                if [ $w -gt 160 ]; then w=160; fi
                 local list_h=$((h - 8))
                 if [ $list_h -lt 5 ]; then list_h=5; fi
                 
                 local choice
-                local clean_hint=$(echo "$M_SELECT_HINT" | sed 's/\x1b\[[0-9;]*m//g')
+                local clean_hint=$(echo "$M_SELECT_HINT" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
                 choice=$(whiptail --title "$M_PLUG_REPO" --menu "$clean_hint" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
                 
                 if [ $? -ne 0 ]; then return; fi
@@ -1406,10 +1308,9 @@ load_i18n() {
         M_BACKUP_OK="${GREEN}备份成功:${NC}"
         M_BACKUP_FAIL="${RED}备份失败${NC}"
         M_DIR_ERR="${RED}目录错${NC}"
-        M_PLUG_INSTALL="安装插件"
+        M_PLUG_MANAGE="管理插件 (安装/卸载)"
         M_PLUG_PLAT="安装平台(SM/MM)"
         M_PLUG_REPO="设置插件库目录"
-        M_PLUG_UNINSTALL="卸载插件"
         M_INSTALLED_PLUGINS="已安装插件"
         M_DOWNLOAD_PACKAGES="下载插件整合包"
         M_SELECT_PACKAGES="选择插件整合包"
