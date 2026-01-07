@@ -1054,10 +1054,14 @@ load_i18n() {
         M_OPT_ARGS="配置启动参数"
         M_OPT_PLUGINS="插件管理"
         M_OPT_BACKUP="备份服务端"
+        M_OPT_DELETE="删除实例"
         M_OPT_AUTO_ON="开启自启"
         M_OPT_AUTO_OFF="关闭自启"
         M_STOP_BEFORE_UPDATE="${YELLOW}更新前需停止服务器${NC}"
         M_ASK_STOP_UPDATE="立即停止并更新? (y/n): "
+        M_ASK_DELETE="${RED}警告: 即将删除实例 '%s'${NC}\n路径: ${YELLOW}%s${NC}\n此操作不可逆！\n确认删除? (y/N): "
+        M_DELETE_OK="${GREEN}实例 '%s' 已删除。${NC}"
+        M_DELETE_CANCEL="${YELLOW}取消删除。${NC}"
         M_NO_UPDATE_SCRIPT="${RED}未找到 update.txt${NC}"
         M_ASK_REBUILD="${YELLOW}是否以匿名模式重建更新脚本? (y/n)${NC}"
         M_CALL_STEAMCMD="${CYAN}正在调用 SteamCMD 更新...${NC}"
@@ -1149,7 +1153,7 @@ control_panel() {
         local st=$(get_status "$n")
         local a_txt="$M_OPT_AUTO_ON"; if [ "$auto" == "true" ]; then a_txt="$M_OPT_AUTO_OFF"; fi
         
-        tui_menu "$M_MANAGE_TITLE $n [$st]" "$M_OPT_START" "$M_OPT_STOP" "$M_OPT_RESTART" "$M_OPT_UPDATE" "$M_OPT_CONSOLE" "$M_OPT_LOGS" "$M_OPT_TRAFFIC" "$M_OPT_ARGS" "$M_OPT_PLUGINS" "$a_txt" "$M_OPT_BACKUP" "$M_RETURN"
+        tui_menu "$M_MANAGE_TITLE $n [$st]" "$M_OPT_START" "$M_OPT_STOP" "$M_OPT_RESTART" "$M_OPT_UPDATE" "$M_OPT_CONSOLE" "$M_OPT_LOGS" "$M_OPT_TRAFFIC" "$M_OPT_ARGS" "$M_OPT_PLUGINS" "$a_txt" "$M_OPT_BACKUP" "$M_OPT_DELETE" "$M_RETURN"
         case $? in
             0) start_srv "$n" "$p" "$port" ;;
             1) stop_srv "$n" ;;
@@ -1162,7 +1166,8 @@ control_panel() {
             8) plugins_menu "$p" ;;
             9) toggle_auto "$n" "$line"; break ;; 
             10) backup_srv "$n" "$p" ;;
-            11) return ;;
+            11) if delete_srv "$n" "$p"; then return; fi ;;
+            12) return ;;
         esac
     done
     control_panel "$n"
@@ -1328,6 +1333,28 @@ backup_srv() {
     rm -f "$list"
     if [ $? -eq 0 ]; then echo -e "$M_BACKUP_OK backups/$f ($(du -h "${BACKUP_DIR}/$f" | cut -f1))${NC}"; else echo -e "$M_BACKUP_FAIL"; fi
     read -n 1 -s -r
+}
+
+delete_srv() {
+    local n="$1"; local p="$2"
+    tui_header
+    printf "$M_ASK_DELETE" "$n" "$p"
+    read -p "" c
+    if [[ "$c" != "y" && "$c" != "Y" ]]; then echo -e "$M_DELETE_CANCEL"; sleep 1; return 1; fi
+    
+    if [ "$(get_status "$n")" == "RUNNING" ]; then
+        stop_srv "$n"
+    fi
+    
+    grep -v "^$n|" "$DATA_FILE" > "${DATA_FILE}.tmp"
+    mv "${DATA_FILE}.tmp" "$DATA_FILE"
+    
+    if [ -d "$p" ]; then rm -rf "$p"; fi
+    rm -f "${TRAFFIC_DIR}/${n}_"*.csv
+    
+    printf "$M_DELETE_OK" "$n"
+    read -n 1 -s -r
+    return 0
 }
 
 traffic_daemon() {
