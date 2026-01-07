@@ -1413,8 +1413,11 @@ download_packages() {
                 
                 # 如果7z失败，尝试使用unzip
                 if [ "$unzip_success" = false ] && command -v unzip >/dev/null 2>&1; then
-                    if unzip -o "$dest" -d "${pkg_dir}" >/dev/null 2>&1; then
-                        unzip_success=true
+                    # 检测是否为zip文件
+                    if file "$dest" | grep -q "Zip archive"; then
+                        if unzip -o "$dest" -d "${pkg_dir}" >/dev/null 2>&1; then
+                            unzip_success=true
+                        fi
                     fi
                 fi
                 
@@ -1423,6 +1426,12 @@ download_packages() {
                     if tar -xf "$dest" -C "${pkg_dir}" >/dev/null 2>&1; then
                         unzip_success=true
                     fi
+                fi
+                
+                # 如果依然失败，且安装了7z但之前失败了，尝试打印错误信息以便调试
+                if [ "$unzip_success" = false ] && command -v 7z >/dev/null 2>&1; then
+                     echo -e "${YELLOW}尝试显示 7z 错误信息:${NC}"
+                     7z x -y -o"${pkg_dir}" "$dest"
                 fi
                 
                 if [ "$unzip_success" = true ]; then
