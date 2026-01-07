@@ -1248,26 +1248,9 @@ download_packages() {
     local pkg_dir="${FINAL_ROOT}/downloaded_packages"
     mkdir -p "$pkg_dir"
     
-    # 尝试探测本地仓库 (适配 WSL/Cygwin/GitBash)
-    local local_warehouse=""
-    local candidates=(
-        "/mnt/e/文档/开发环境/server_install/豆瓣酱战役整合包"
-        "/e/文档/开发环境/server_install/豆瓣酱战役整合包"
-        "/cygdrive/e/文档/开发环境/server_install/豆瓣酱战役整合包"
-        "e:/文档/开发环境/server_install/豆瓣酱战役整合包"
-    )
-    
-    for c in "${candidates[@]}"; do
-        if [ -d "$c" ]; then local_warehouse="$c"; break; fi
-    done
-
     echo -e "${YELLOW}请选择操作:${NC}"
     echo -e "1. 从 GitHub 镜像站下载 (网络)"
-    local opt_2_txt="2. 从本地仓库导入 (需手动输入路径)"
-    if [ -n "$local_warehouse" ]; then
-        opt_2_txt="2. 从本地仓库导入 (检测到: $local_warehouse)"
-    fi
-    echo -e "$opt_2_txt"
+    echo -e "2. 从本地仓库导入 (需手动输入路径)"
     echo -e "3. 返回"
     read -p "> " choice
     
@@ -1278,8 +1261,8 @@ download_packages() {
     if [ "$choice" == "1" ]; then
         source_mode="network"
         # 从GitHub仓库获取插件整合包列表
-        local repo="soloxiaoye2022/server_install"
-        local api_url="https://api.github.com/repos/${repo}/contents/豆瓣酱战役整合包"
+        local repo="soloxiaoye2022/L4D2-Server-Manager"
+        local api_url="https://api.github.com/repos/${repo}/contents/l4d2_plugins"
         local proxy_api_url="https://gh-proxy.com/${api_url}"
         
         echo -e "${CYAN}正在获取插件整合包列表...${NC}"
@@ -1319,11 +1302,9 @@ download_packages() {
         
     elif [ "$choice" == "2" ]; then
         source_mode="local"
-        local target_path="$local_warehouse"
-        if [ -z "$target_path" ]; then
-            echo -e "${YELLOW}请输入本地仓库的绝对路径:${NC}"
-            read -e target_path
-        fi
+        local target_path=""
+        echo -e "${YELLOW}请输入本地仓库的绝对路径:${NC}"
+        read -e target_path
         
         if [ ! -d "$target_path" ]; then echo -e "${RED}目录不存在。${NC}"; read -n 1 -s -r; return; fi
         source_path="$target_path"
@@ -1371,8 +1352,8 @@ download_packages() {
             local process_success=false
             
             if [ "$source_mode" == "network" ]; then
-                local repo="soloxiaoye2022/server_install"
-                local raw_url="https://raw.githubusercontent.com/${repo}/main/豆瓣酱战役整合包/${pkg}"
+                local repo="soloxiaoye2022/L4D2-Server-Manager"
+                local raw_url="https://raw.githubusercontent.com/${repo}/main/l4d2_plugins/${pkg}"
                 local proxy_url="https://gh-proxy.com/${raw_url}"
                 
                 echo -e "\n${CYAN}正在下载: ${pkg}${NC}"
