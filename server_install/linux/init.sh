@@ -81,7 +81,6 @@ mkdir -p "$JS_MODS_DIR"
 # 链接清单定义
 LINK_DIRS=(
     "left4dead2/bin"
-    "left4dead2/downloads"
     "left4dead2/expressions"
     "left4dead2/gfx"
     "left4dead2/maps"
@@ -1476,7 +1475,7 @@ load_i18n() {
         M_OPT_START="启动"
         M_OPT_STOP="停止"
         M_OPT_RESTART="重启"
-        M_OPT_UPDATE="更新服务端"
+        M_OPT_UPDATE="更新核心服务端 (所有实例)"
         M_OPT_CONSOLE="控制台"
         M_OPT_LOGS="日志"
         M_OPT_TRAFFIC="流量统计"
@@ -1486,8 +1485,8 @@ load_i18n() {
         M_OPT_DELETE="删除实例"
         M_OPT_AUTO_ON="开启自启"
         M_OPT_AUTO_OFF="关闭自启"
-        M_STOP_BEFORE_UPDATE="${YELLOW}更新前需停止服务器${NC}"
-        M_ASK_STOP_UPDATE="立即停止并更新? (y/n): "
+        M_STOP_BEFORE_UPDATE="${YELLOW}警告: 此操作将更新核心文件，所有链接实例都会受影响。${NC}"
+        M_ASK_STOP_UPDATE="建议在所有服务器空闲时进行。\n是否继续更新主服务端? (y/n): "
         M_ASK_DELETE="${RED}警告: 即将删除实例 '%s'${NC}\n路径: ${YELLOW}%s${NC}\n此操作不可逆！\n确认删除? (y/N): "
         M_DELETE_OK="${GREEN}实例 '%s' 已删除。${NC}"
         M_DELETE_CANCEL="${YELLOW}取消删除。${NC}"
@@ -1605,7 +1604,7 @@ load_i18n() {
         M_OPT_START="Start"
         M_OPT_STOP="Stop"
         M_OPT_RESTART="Restart"
-        M_OPT_UPDATE="Update Server"
+        M_OPT_UPDATE="Update Core Server (All Instances)"
         M_OPT_CONSOLE="Console"
         M_OPT_LOGS="Logs"
         M_OPT_TRAFFIC="Traffic Stats"
@@ -1615,8 +1614,8 @@ load_i18n() {
         M_OPT_DELETE="Delete"
         M_OPT_AUTO_ON="Enable Auto-Start"
         M_OPT_AUTO_OFF="Disable Auto-Start"
-        M_STOP_BEFORE_UPDATE="${YELLOW}Stop server before update${NC}"
-        M_ASK_STOP_UPDATE="Stop and update now? (y/n): "
+        M_STOP_BEFORE_UPDATE="${YELLOW}Warning: This updates core files affecting all linked instances.${NC}"
+        M_ASK_STOP_UPDATE="Recommended to run when servers are idle.\nProceed to update Main Server? (y/n): "
         M_ASK_DELETE="${RED}Warning: Deleting instance '%s'${NC}\nPath: ${YELLOW}%s${NC}\nIrreversible!\nConfirm? (y/N): "
         M_DELETE_OK="${GREEN}Instance '%s' deleted.${NC}"
         M_DELETE_CANCEL="${YELLOW}Deletion cancelled.${NC}"
@@ -1968,20 +1967,20 @@ toggle_link_vpks() {
 
 update_srv() {
     local n="$1"; local p="$2"
-    if [ "$(get_status "$n")" == "RUNNING" ]; then
-        MENU_TITLE="更新服务端" \
-        tui_menu "$M_STOP_BEFORE_UPDATE\n$M_ASK_STOP_UPDATE" \
-            "1. 是 (Yes)" \
-            "2. 否 (No)"
-        if [ $? -ne 0 ]; then return; fi
-        stop_srv "$n"
-    fi
     
+    # 提示更新的是核心服务端
+    MENU_TITLE="更新核心服务端" \
+    tui_menu "$M_STOP_BEFORE_UPDATE\n$M_ASK_STOP_UPDATE" \
+        "1. 是 (Yes)" \
+        "2. 否 (No)"
+    if [ $? -ne 0 ]; then return; fi
+
     echo -e "$M_UPDATE_CACHE"
     mkdir -p "$SERVER_CACHE_DIR"
     local cache_script="${SERVER_CACHE_DIR}/update_cache.txt"
     
     if [ ! -f "$cache_script" ]; then
+        # 如果缓存脚本不存在，尝试重建
         MENU_TITLE="更新服务端" \
         tui_menu "$M_NO_UPDATE_SCRIPT\n$M_ASK_REBUILD" \
             "1. 是 (Yes)" \
@@ -2007,18 +2006,14 @@ update_srv() {
     
     echo -e "$M_CALL_STEAMCMD"
     export LANG=en_US.UTF-8; export LC_ALL=en_US.UTF-8
-    "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$cache_script" | grep -v "CHTTPClientThreadPool"
     
-    echo -e "$M_COPY_CACHE"
-    if command -v rsync >/dev/null 2>&1; then
-        rsync -a --info=progress2 --exclude="server.cfg" --exclude="banned_user.cfg" --exclude="banned_ip.cfg" "$SERVER_CACHE_DIR/" "$p/"
-    else
-        cp -rfu "$SERVER_CACHE_DIR/"* "$p/"
-    fi
+    # 仅更新 Cache，不再执行复制到实例的操作
+    "${STEAMCMD_DIR}/steamcmd.sh" +runscript "$cache_script" | grep -v "CHTTPClientThreadPool"
     
     echo -e "\n${GREEN}======================================${NC}"
     echo -e "${GREEN}        $M_SUCCESS $M_UPDATED            ${NC}"
     echo -e "${GREEN}======================================${NC}"
+    echo -e "${YELLOW}注意: 链接模式的实例已自动更新。${NC}"
     read -n 1 -s -r
 }
 
