@@ -19,6 +19,11 @@ setup_env() {
         fi
     else
         export LANG=C.UTF-8; export LC_ALL=C.UTF-8
+        M_NO_REPO_ASK_DL="Plugin repo not set or invalid (must contain JS-MODS).\nDownload plugin packages now?"
+        M_REPO_AUTO_SET="Auto-selected plugin repo: "
+        M_REPO_SELECT_TITLE="Multiple Valid Packages Found"
+        M_REPO_SELECT_MSG="Please select one as current repo:"
+        M_NO_VALID_PKG="${RED}No valid package found (must contain JS-MODS).${NC}"
     fi
 }
 setup_env
@@ -497,12 +502,12 @@ tui_msgbox() {
             if [ $len -gt $max_line_len ]; then max_line_len=$len; fi
         done <<< "$clean_t"
         
-        # 基础宽度 = 最长行 + 边框填充(大约15)
-        local w=$((max_line_len + 15))
+        # 基础宽度 = 最长行 + 边框填充(大约20)
+        local w=$((max_line_len + 20))
         
         # 限制最小/最大宽度
         local term_cols=$(tput cols)
-        if [ $w -lt 40 ]; then w=40; fi
+        if [ $w -lt 50 ]; then w=50; fi
         if [ $w -gt $((term_cols - 4)) ]; then w=$((term_cols - 4)); fi
         
         # 自动计算高度
@@ -576,11 +581,11 @@ tui_menu() {
         done
         
         # 基础宽度
-        local w=$((max_len + 20))
+        local w=$((max_len + 24))
         local term_cols=$(tput cols)
         local term_lines=$(tput lines)
         
-        if [ $w -lt 50 ]; then w=50; fi
+        if [ $w -lt 60 ]; then w=60; fi
         if [ $w -gt $((term_cols - 4)) ]; then w=$((term_cols - 4)); fi
         
         # 高度计算 (更稳健的逻辑)
@@ -1098,18 +1103,6 @@ download_packages() {
                     echo -e "${GREEN}解压完成: ${pkg}${NC}"
                     echo -e "${CYAN}文件已保存至: ${extract_root}${NC}"
                     
-                    # 智能检测: 如果解压后包含 JS-MODS 目录，提示用户是否设为默认库
-                    if [ -d "${extract_root}/JS-MODS" ]; then
-                         JS_MODS_DIR="${extract_root}/JS-MODS"
-                         echo "${extract_root}/JS-MODS" > "$PLUGIN_CONFIG"
-                         echo -e "${GREEN}==> 已自动将插件库路径更新为: ${extract_root}/JS-MODS${NC}"
-                    elif [ -d "${extract_root}/addons" ]; then
-                         # 有些包可能直接是 addons 结构
-                         JS_MODS_DIR="${extract_root}"
-                         echo "${extract_root}" > "$PLUGIN_CONFIG"
-                         echo -e "${GREEN}==> 已自动将插件库路径更新为: ${extract_root}${NC}"
-                    fi
-                    
                     rm -f "$dest"
                     ((c++))
                 else
@@ -1119,14 +1112,92 @@ download_packages() {
         fi
     done
     
-    echo -e "\n${GREEN}处理完成，共成功 ${c} 个包${NC}"; MENU_TITLE="$M_DOWNLOAD_PACKAGES" tui_msgbox "${GREEN}处理完成，共成功 ${c} 个包${NC}"
+    echo -e "\n${GREEN}处理完成，共成功 ${c} 个包${NC}"
+    
+    # 下载完成后，尝试自动设置插件库
+    if [ $c -gt 0 ]; then
+        auto_select_repo
+    else
+        MENU_TITLE="$M_DOWNLOAD_PACKAGES" tui_msgbox "${GREEN}处理完成，共成功 ${c} 个包${NC}"
+    fi
+}
+
+# 自动扫描并选择下载的插件库
+auto_select_repo() {
+    local pkg_dir="${FINAL_ROOT}/downloaded_packages"
+    local valid_repos=()
+    local valid_names=()
+    
+    # 扫描包含 JS-MODS 的有效目录
+    if [ -d "$pkg_dir" ]; then
+        while IFS= read -r -d '' dir; do
+            if [ -d "$dir/JS-MODS" ]; then
+                valid_repos+=("$dir/JS-MODS")
+                valid_names+=("$(basename "$dir")")
+            fi
+        done < <(find "$pkg_dir" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
+    fi
+    
+    local count=${#valid_repos[@]}
+    
+    if [ $count -eq 0 ]; then
+        MENU_TITLE="$M_DOWNLOAD_PACKAGES" tui_msgbox "$M_NO_VALID_PKG"
+    elif [ $count -eq 1 ]; then
+        JS_MODS_DIR="${valid_repos[0]}"
+        echo "$JS_MODS_DIR" > "$PLUGIN_CONFIG"
+        MENU_TITLE="$M_DOWNLOAD_PACKAGES" tui_msgbox "${GREEN}$M_REPO_AUTO_SET\n${CYAN}$JS_MODS_DIR${NC}"
+    else
+        # 多个有效包，让用户选择
+        local menu_opts=()
+        for name in "${valid_names[@]}"; do
+            menu_opts+=("$name")
+        done
+        
+        MENU_TITLE="$M_REPO_SELECT_TITLE" \
+        tui_menu "$M_REPO_SELECT_MSG" "${menu_opts[@]}"
+        
+        local sel=$?
+        if [ $sel -ne 255 ] && [ $sel -lt $count ]; then
+            JS_MODS_DIR="${valid_repos[$sel]}"
+            echo "$JS_MODS_DIR" > "$PLUGIN_CONFIG"
+            MENU_TITLE="$M_DOWNLOAD_PACKAGES" tui_msgbox "${GREEN}$M_REPO_AUTO_SET\n${CYAN}$JS_MODS_DIR${NC}"
+        fi
+    fi
 }
 
 manage_plugins() {
     local t="$1/left4dead2"
     local rec_dir="$1/.plugin_records"
     
-    if [ ! -d "$JS_MODS_DIR" ]; then MENU_TITLE="$M_PLUG_MANAGE" tui_msgbox "$M_REPO_NOT_FOUND $JS_MODS_DIR"; return; fi
+    # 检查插件库设置是否有效 (必须包含 JS-MODS 目录或自身即为 JS-MODS 结构，但这里我们统一要求 JS_MODS_DIR 变量指向 .../JS-MODS)
+    # 同时检查目录是否为空
+    local need_download=false
+    
+    if [ -z "$JS_MODS_DIR" ] || [ ! -d "$JS_MODS_DIR" ]; then
+        need_download=true
+    else
+        # 检查目录下是否有子目录 (插件)
+        local plugin_count=$(find "$JS_MODS_DIR" -mindepth 1 -maxdepth 1 -type d | head -1 | wc -l)
+        if [ "$plugin_count" -eq 0 ]; then
+            need_download=true
+        fi
+    fi
+    
+    if [ "$need_download" = true ]; then
+        MENU_TITLE="$M_PLUG_MANAGE" \
+        tui_menu "$M_NO_REPO_ASK_DL" \
+            "1. 是 (Yes)" \
+            "2. 否 (No)"
+            
+        if [ $? -eq 0 ]; then
+            download_packages
+            # 下载流程结束后再次检查
+            if [ -z "$JS_MODS_DIR" ] || [ ! -d "$JS_MODS_DIR" ]; then return; fi
+        else
+            return
+        fi
+    fi
+    
     mkdir -p "$rec_dir"
     
     # 1. Gather all available plugins
@@ -1333,8 +1404,14 @@ set_plugin_repo() {
     case "$choice" in
         1)
             local pkg_list=()
-            for dir in "$pkg_dir"/*; do if [ -d "$dir" ]; then pkg_list+=("$(basename "$dir")"); fi; done
-            if [ ${#pkg_list[@]} -eq 0 ]; then MENU_TITLE="$M_PLUG_REPO" tui_msgbox "${YELLOW}没有已下载的插件整合包${NC}"; return; fi
+            # 仅列出包含 JS-MODS 的有效包
+            for dir in "$pkg_dir"/*; do 
+                if [ -d "$dir" ] && [ -d "$dir/JS-MODS" ]; then 
+                    pkg_list+=("$(basename "$dir")"); 
+                fi; 
+            done
+            
+            if [ ${#pkg_list[@]} -eq 0 ]; then MENU_TITLE="$M_PLUG_REPO" tui_msgbox "${YELLOW}没有找到有效的插件整合包 (需包含 JS-MODS 目录)${NC}"; return; fi
             
             local cur=0
             local tot=${#pkg_list[@]}
@@ -1355,11 +1432,12 @@ set_plugin_repo() {
             
             if [ $cur -lt ${#pkg_list[@]} ]; then
                 local selected_dir="$pkg_dir/${pkg_list[$cur]}/JS-MODS"
+                # 双重检查
                 if [ -d "$selected_dir" ]; then
                     JS_MODS_DIR="$selected_dir"; echo "$selected_dir" > "$PLUGIN_CONFIG"
                     MENU_TITLE="$M_PLUG_REPO" tui_msgbox "${GREEN}已选择插件库: $selected_dir${NC}"
                 else
-                    MENU_TITLE="$M_PLUG_REPO" tui_msgbox "${RED}整合包结构不正确，缺少JS-MODS目录${NC}"
+                    MENU_TITLE="$M_PLUG_REPO" tui_msgbox "${RED}错误: 目录结构异常${NC}"
                 fi
             fi
             ;;
@@ -1543,6 +1621,11 @@ load_i18n() {
         M_UN_CONFIRM="${RED}确定要执行此操作吗？此操作不可逆！${NC}"
         M_UN_DONE="${GREEN}操作已完成。${NC}"
         M_UN_FULL_DONE="${GREEN}L4M 已完全卸载。再见！${NC}"
+        M_NO_REPO_ASK_DL="未设置插件库或库内无有效插件包 (需包含 JS-MODS 目录)。\n是否立即下载插件整合包?"
+        M_REPO_AUTO_SET="已自动选择并设置插件库: "
+        M_REPO_SELECT_TITLE="检测到多个有效插件包"
+        M_REPO_SELECT_MSG="请选择一个作为当前使用的插件库:"
+        M_NO_VALID_PKG="${RED}未找到包含 JS-MODS 结构的有效插件包。${NC}"
     else
         M_TITLE="=== L4D2 Manager (L4M) ==="
         M_WELCOME="Welcome to L4D2 Server Manager (L4M)"
@@ -1672,6 +1755,11 @@ load_i18n() {
         M_UN_CONFIRM="${RED}Are you sure? This is irreversible!${NC}"
         M_UN_DONE="${GREEN}Operation completed.${NC}"
         M_UN_FULL_DONE="${GREEN}L4M has been uninstalled. Goodbye!${NC}"
+        M_NO_REPO_ASK_DL="Plugin repo not set or invalid (must contain JS-MODS).\nDownload plugin packages now?"
+        M_REPO_AUTO_SET="Auto-selected plugin repo: "
+        M_REPO_SELECT_TITLE="Multiple Valid Packages Found"
+        M_REPO_SELECT_MSG="Please select one as current repo:"
+        M_NO_VALID_PKG="${RED}No valid package found (must contain JS-MODS).${NC}"
     fi
 }
 
