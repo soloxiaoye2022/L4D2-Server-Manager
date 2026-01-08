@@ -529,13 +529,26 @@ install_smart() {
 self_update() {
     echo -e "$M_CHECK_UPDATE"
     local temp="/tmp/l4m_upd.sh"
+    rm -f "$temp"
+    
+    # Force use of a known working mirror for script updates if possible, or use standard download
+    # Since we are updating the script itself, we want high reliability.
     
     if download_file "soloxiaoye2022/server_install/main/server_install/linux/init.sh" "$temp" "Update Script"; then
         if grep -q "main()" "$temp"; then
             mv "$temp" "$FINAL_ROOT/l4m"; chmod +x "$FINAL_ROOT/l4m"
             echo -e "$M_UPDATE_SUCCESS"; sleep 1; exec "$FINAL_ROOT/l4m"
         else
-            echo -e "$M_VERIFY_FAIL"; rm "$temp"
+            echo -e "$M_VERIFY_FAIL"
+            echo -e "${YELLOW}Debug Info:${NC}"
+            echo -e "File size: $(wc -c < "$temp" 2>/dev/null) bytes"
+            echo -e "Head content (first 10 lines):"
+            echo "----------------------------------------"
+            head -n 10 "$temp"
+            echo "----------------------------------------"
+            echo -e "${YELLOW}Wait 10s to read debug info...${NC}"
+            sleep 10
+            rm "$temp"
         fi
     else
         echo -e "$M_CONN_FAIL"
