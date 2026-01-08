@@ -439,7 +439,7 @@ tui_menu() {
     local t="$1"; shift; local opts=("$@"); local sel=0; local tot=${#opts[@]}
     
     if command -v whiptail >/dev/null 2>&1; then
-        # 修复: 清理标题中的颜色代码，防止 whiptail 显示乱码
+        # 修复: 清理标题中的颜色代码
         local clean_title=$(echo -e "$t" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
         local max_len=${#clean_title}
         
@@ -457,30 +457,42 @@ tui_menu() {
             args+=("$((i+1))" "${clean_opt}")
         done
         
-        # 基础宽度 = 最长选项 + 序号占位(5) + 边框填充(15)
+        # 基础宽度
         local w=$((max_len + 20))
-        
-        # Constraints
         local term_cols=$(tput cols)
         local term_lines=$(tput lines)
         
         if [ $w -lt 50 ]; then w=50; fi
         if [ $w -gt $((term_cols - 4)) ]; then w=$((term_cols - 4)); fi
         
-        # 高度计算
-        local h=$((term_lines - 4))
+        # 高度计算 (更稳健的逻辑)
+        # 边框+标题+底部按钮大约需要 8 行
+        local border_h=8
+        # 预留给终端提示符的空间
+        local max_h=$((term_lines - 4))
+        if [ $max_h -lt 10 ]; then max_h=$term_lines; fi # 极端情况占满全屏
+        
+        local h=$max_h
         if [ $h -gt 30 ]; then h=30; fi
         
-        # 列表高度 = 总高度 - 顶部标题栏/边框(大约8)
-        # 务必保证有足够的空间显示列表，否则列表内容会不可见
-        local list_h=$((h - 8))
-        if [ $list_h -lt 5 ]; then list_h=5; fi
-        # 如果总高度不足以容纳最小列表，强制增加总高度
-        if [ $((list_h + 8)) -gt $h ]; then h=$((list_h + 8)); fi
+        # 计算列表高度
+        local list_h=$((h - border_h))
         
+        # 如果列表高度太小，尝试增加总高度，但不能超过 max_h
+        if [ $list_h -lt 5 ]; then 
+            list_h=5
+            h=$((list_h + border_h))
+            if [ $h -gt $max_h ]; then 
+                h=$max_h 
+                list_h=$((h - border_h))
+            fi
+        fi
+        
+        # 如果最终列表高度还是太小(例如终端极小)，whiptail可能会失败，但这已是尽力了
+        if [ $list_h -lt 1 ]; then list_h=1; fi
+
         local box_title="${MENU_TITLE:-$M_TITLE}"
         
-        # 使用 clean_title
         local choice
         choice=$(whiptail --title "$box_title" --menu "$clean_title" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
         
@@ -489,7 +501,23 @@ tui_menu() {
         else
             return 255
         fi
+    else
+        # Fallback: 纯文本菜单
+        tui_header
+        echo -e "${CYAN}$t${NC}"
+        for ((i=0; i<tot; i++)); do
+            echo -e "${GREEN}$((i+1)).${NC} ${opts[i]}"
+        done
+        echo ""
+        local choice
+        read -p "Please select [1-$tot]: " choice
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$tot" ]; then
+            return $((choice-1))
+        else
+            return 255
+        fi
     fi
+}
 
     tput civis; trap 'tput cnorm' EXIT
     while true; do
@@ -2254,7 +2282,10 @@ main() {
         local l="1"
         if [ $? -eq 1 ]; then l="2"; fi
         
+        # 确保目录存在
+        mkdir -p "$(dirname "$CONFIG_FILE")"
         if [ "$l" == "2" ]; then echo "zh" > "$CONFIG_FILE"; else echo "en" > "$CONFIG_FILE"; fi
+        
         if [ "$l" == "2" ] && [ "$EUID" -eq 0 ]; then
              if [ -f /etc/debian_version ]; then
                  echo -e "${YELLOW}Configuring Chinese Locale...${NC}"
@@ -2265,7 +2296,8 @@ main() {
              fi
         fi
     fi
-    if [ -f "$CONFIG_FILE" ]; then load_i18n $(cat "$CONFIG_FILE"); else load_i18n "en"; fi
+    # 使用双引号包裹 cat 输出，防止参数传递错误
+    if [ -f "$CONFIG_FILE" ]; then load_i18n "$(cat "$CONFIG_FILE")"; else load_i18n "en"; fi
     
     if [[ "$INSTALL_TYPE" == "temp" ]]; then
         local exist_path=""
