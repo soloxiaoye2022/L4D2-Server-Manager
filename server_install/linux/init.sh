@@ -1308,6 +1308,7 @@ load_i18n() {
         M_DEPLOY="部署新实例"
         M_MANAGE="实例管理"
         M_UPDATE="系统更新"
+        M_DEPS="依赖管理 / 换源"
         M_LANG="切换语言 / Language"
         M_EXIT="退出"
         M_SUCCESS="${GREEN}[成功]${NC}"
@@ -1756,6 +1757,248 @@ view_traffic() {
 }
 
 #=============================================================================
+# 9. 依赖管理与换源模块 (Dependency Manager)
+#=============================================================================
+
+# 核心依赖列表
+# 格式: 通用名称|Debian包名|RHEL包名|描述
+DEP_LIST=(
+    "tmux|tmux|tmux|多路复用终端"
+    "curl|curl|curl|网络传输工具"
+    "wget|wget|wget|文件下载工具"
+    "tar|tar|tar|归档工具"
+    "tree|tree|tree|目录树查看"
+    "sed|sed|sed|流编辑器"
+    "awk|gawk|gawk|文本处理工具"
+    "lsof|lsof|lsof|文件/端口查看"
+    "7z|p7zip-full|p7zip|7z压缩支持"
+    "unzip|unzip|unzip|Zip解压工具"
+    "file|file|file|文件类型检测"
+    "whiptail|whiptail|newt|图形化界面支持"
+    "lib32gcc|lib32gcc-s1|glibc.i686|32位运行库(GCC)"
+    "lib32stdc++|lib32stdc++6|libstdc++.i686|32位运行库(C++)"
+    "ca-certificates|ca-certificates|ca-certificates|SSL证书"
+)
+
+# 检测依赖状态
+# 返回: 0=全部安装, 1=有缺失
+check_dep_status_core() {
+    local missing=0
+    local info_arr=()
+    
+    # 针对 Debian/Ubuntu 的 lib32gcc 兼容性处理
+    local lib32gcc_name="lib32gcc-s1"
+    if [ -f /etc/debian_version ]; then
+        # 尝试检测旧版 lib32gcc1
+        if apt-cache show lib32gcc1 >/dev/null 2>&1; then
+             lib32gcc_name="lib32gcc1"
+        fi
+    fi
+    
+    for item in "${DEP_LIST[@]}"; do
+        local name=$(echo "$item" | cut -d'|' -f1)
+        local deb_pkg=$(echo "$item" | cut -d'|' -f2)
+        local rpm_pkg=$(echo "$item" | cut -d'|' -f3)
+        local desc=$(echo "$item" | cut -d'|' -f4)
+        
+        # 特殊处理 lib32gcc
+        if [ "$name" == "lib32gcc" ] && [ -f /etc/debian_version ]; then deb_pkg="$lib32gcc_name"; fi
+        
+        local status="MISSING"
+        local color="${RED}"
+        
+        # 检查逻辑
+        if [[ "$name" == lib* ]] || [[ "$name" == ca-* ]]; then
+             # 库文件检查 (简化版: 只要 dpkg/rpm 能查到就算安装)
+             if [ -f /etc/debian_version ]; then
+                 if dpkg -l | grep -qw "$deb_pkg"; then status="INSTALLED"; color="${GREEN}"; fi
+             elif [ -f /etc/redhat-release ]; then
+                 if rpm -qa | grep -qw "$rpm_pkg"; then status="INSTALLED"; color="${GREEN}"; fi
+             fi
+        else
+             # 常用命令检查
+             if command -v "$name" >/dev/null 2>&1; then status="INSTALLED"; color="${GREEN}"; fi
+        fi
+        
+        if [ "$status" == "MISSING" ]; then ((missing++)); fi
+        info_arr+=("${color}[${status}]${NC} ${name} (${desc})")
+    done
+    
+    # 仅在需要显示时输出
+    if [ "$1" == "print" ]; then
+        tui_header
+        echo -e "${CYAN}依赖安装状态:${NC}"
+        echo "----------------------------------------"
+        for line in "${info_arr[@]}"; do echo -e "$line"; done
+        echo "----------------------------------------"
+        if [ $missing -eq 0 ]; then
+            echo -e "${GREEN}完美！所有依赖已就绪。${NC}"
+        else
+            echo -e "${YELLOW}发现 $missing 个缺失依赖。${NC}"
+        fi
+    fi
+    
+    if [ $missing -eq 0 ]; then return 0; else return 1; fi
+}
+
+# 智能安装所有依赖
+install_all_deps_smart() {
+    if [ "$EUID" -ne 0 ]; then
+        echo -e "${RED}安装依赖需要 Root 权限。${NC}"
+        echo -e "${YELLOW}请尝试: sudo l4m${NC}"
+        read -n 1 -s -r; return
+    fi
+    
+    echo -e "${CYAN}正在初始化安装进程...${NC}"
+    
+    local cmd_update=""
+    local cmd_install=""
+    local pkg_list=""
+    
+    # 1. 检测包管理器并构建列表
+    if [ -f /etc/debian_version ]; then
+        # 修复潜在的 dpkg 中断
+        dpkg --configure -a
+        
+        # 开启 32 位支持
+        dpkg --add-architecture i386
+        
+        # 智能判断 lib32gcc 版本
+        local lib32gcc="lib32gcc-s1"
+        # 这是一个简单的试探，如果 apt-cache 报错(如源坏了)，默认为 lib32gcc-s1
+        if apt-cache show lib32gcc1 >/dev/null 2>&1; then lib32gcc="lib32gcc1"; fi
+        
+        pkg_list="tmux curl wget tar tree sed gawk lsof p7zip-full unzip file whiptail $lib32gcc lib32stdc++6 ca-certificates"
+        
+        # 允许 update 失败但继续安装 (修复坏源卡死问题)
+        cmd_update="apt-get update -qq || echo -e '${YELLOW}部分源更新失败，尝试继续安装...${NC}'"
+        # 使用 --fix-missing 尝试修复
+        cmd_install="apt-get install -y --fix-missing $pkg_list"
+        
+    elif [ -f /etc/redhat-release ]; then
+        pkg_list="tmux curl wget tar tree sed gawk lsof p7zip unzip file newt glibc.i686 libstdc++.i686"
+        cmd_update="yum makecache"
+        cmd_install="yum install -y $pkg_list"
+    else
+        echo -e "${RED}未知的发行版，无法自动安装。${NC}"; read -n 1 -s -r; return
+    fi
+    
+    echo -e "${YELLOW}Step 1: 更新软件源索引...${NC}"
+    eval "$cmd_update"
+    
+    echo -e "${YELLOW}Step 2: 安装软件包...${NC}"
+    if eval "$cmd_install"; then
+        echo -e "${GREEN}安装指令执行完毕。${NC}"
+    else
+        echo -e "${RED}安装过程中出现错误。${NC}"
+        echo -e "${YELLOW}建议尝试 [换源] 功能修复网络问题。${NC}"
+    fi
+    
+    read -n 1 -s -r
+}
+
+# 换源功能
+change_repo_source() {
+    if [ "$EUID" -ne 0 ]; then echo -e "${RED}需 Root 权限${NC}"; read -n 1 -s -r; return; fi
+    
+    tui_header
+    echo -e "${CYAN}Linux 智能换源助手${NC}"
+    echo "----------------------------------------"
+    
+    # 1. 识别发行版
+    local dist=""
+    local code=""
+    local ver=""
+    
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        dist=$ID
+        code=$VERSION_CODENAME
+        ver=$VERSION_ID
+    fi
+    
+    echo -e "检测到系统: ${GREEN}${dist} ${ver} (${code})${NC}"
+    
+    if [[ "$dist" != "debian" && "$dist" != "ubuntu" && "$dist" != "centos" ]]; then
+        echo -e "${RED}当前仅支持 Debian / Ubuntu / CentOS 自动换源。${NC}"
+        read -n 1 -s -r; return
+    fi
+    
+    echo -e "\n请选择要更换的国内源:"
+    echo "1. 阿里云 (Aliyun) - 推荐"
+    echo "2. 清华大学 (TUNA)"
+    echo "3. 腾讯云 (Tencent)"
+    echo "4. 还原官方源 (Restore)"
+    echo "5. 返回"
+    read -p "> " choice
+    
+    local domain=""
+    case "$choice" in
+        1) domain="mirrors.aliyun.com" ;;
+        2) domain="mirrors.tuna.tsinghua.edu.cn" ;;
+        3) domain="mirrors.cloud.tencent.com" ;;
+        4) domain="restore" ;;
+        *) return ;;
+    esac
+    
+    local file="/etc/apt/sources.list"
+    if [ "$dist" == "centos" ]; then file="/etc/yum.repos.d/CentOS-Base.repo"; fi
+    
+    # 备份
+    if [ ! -f "${file}.bak" ]; then cp "$file" "${file}.bak"; fi
+    
+    echo -e "${YELLOW}正在配置源...${NC}"
+    
+    if [ "$domain" == "restore" ]; then
+        if [ -f "${file}.bak" ]; then cp "${file}.bak" "$file"; echo -e "${GREEN}已还原。${NC}"; else echo -e "${RED}无备份文件。${NC}"; fi
+    else
+        if [ "$dist" == "debian" ]; then
+            # Debian 智能生成
+            echo "deb http://${domain}/debian/ ${code} main contrib non-free" > "$file"
+            echo "deb http://${domain}/debian/ ${code}-updates main contrib non-free" >> "$file"
+            echo "deb http://${domain}/debian/ ${code}-backports main contrib non-free" >> "$file"
+            echo "deb http://${domain}/debian-security ${code}-security main contrib non-free" >> "$file"
+            
+        elif [ "$dist" == "ubuntu" ]; then
+            # Ubuntu 智能生成
+            echo "deb http://${domain}/ubuntu/ ${code} main restricted universe multiverse" > "$file"
+            echo "deb http://${domain}/ubuntu/ ${code}-updates main restricted universe multiverse" >> "$file"
+            echo "deb http://${domain}/ubuntu/ ${code}-backports main restricted universe multiverse" >> "$file"
+            echo "deb http://${domain}/ubuntu/ ${code}-security main restricted universe multiverse" >> "$file"
+            
+        elif [ "$dist" == "centos" ]; then
+            # CentOS 简单处理 (使用 curl 下载对应 repo，这里简化为通用逻辑或提示)
+            echo -e "${YELLOW}CentOS 换源建议使用: curl -o /etc/yum.repos.d/CentOS-Base.repo http://${domain}/repo/Centos-${ver}.repo${NC}"
+            # 尝试直接下载
+            local repo_ver=$(echo "$ver" | cut -d. -f1)
+            curl -o /etc/yum.repos.d/CentOS-Base.repo "http://${domain}/repo/Centos-${repo_ver}.repo"
+        fi
+        echo -e "${GREEN}源文件已更新。${NC}"
+    fi
+    
+    echo -e "${CYAN}正在刷新缓存...${NC}"
+    if [ "$dist" == "centos" ]; then
+        yum makecache
+    else
+        apt-get update
+    fi
+    
+    echo -e "${GREEN}操作完成。${NC}"; read -n 1 -s -r
+}
+
+dep_manager_menu() {
+    while true; do
+        tui_menu "依赖管理中心" "查看依赖安装状态" "一键安装/修复所有依赖" "更换系统软件源 (修复下载慢)" "返回"
+        case $? in
+            0) check_dep_status_core "print"; read -n 1 -s -r ;;
+            1) install_all_deps_smart ;;
+            2) change_repo_source ;;
+            *) return ;;
+        esac
+    done
+}
+
+#=============================================================================
 # 8. Main Entry
 #=============================================================================
 main() {
@@ -1807,9 +2050,9 @@ main() {
     if [ ! -f "$DATA_FILE" ]; then touch "$DATA_FILE"; fi
     
     while true; do
-        tui_menu "$M_MAIN_MENU" "$M_DEPLOY" "$M_MANAGE" "$M_DOWNLOAD_PACKAGES" "$M_UPDATE" "$M_LANG" "$M_EXIT"
+        tui_menu "$M_MAIN_MENU" "$M_DEPLOY" "$M_MANAGE" "$M_DOWNLOAD_PACKAGES" "$M_DEPS" "$M_UPDATE" "$M_LANG" "$M_EXIT"
         case $? in
-            0) deploy_wizard ;; 1) manage_menu ;; 2) download_packages ;; 3) self_update ;; 4) change_lang ;; 5|255) exit 0 ;;
+            0) deploy_wizard ;; 1) manage_menu ;; 2) download_packages ;; 3) dep_manager_menu ;; 4) self_update ;; 5) change_lang ;; 6|255) exit 0 ;;
         esac
     done
 }
