@@ -140,6 +140,76 @@ check_deps() {
     eval "$cmd"
 }
 
+# 生成独立更新脚本
+generate_updater() {
+    local path="$1"
+    cat << 'EOF' > "$path"
+#!/bin/bash
+# L4M 独立更新器
+RED='\033[31m'; GREEN='\033[32m'; YELLOW='\033[33m'; NC='\033[0m'
+
+echo -e "${YELLOW}正在启动独立更新...${NC}"
+
+# 定义镜像列表 (与主脚本保持一致)
+MIRRORS=(
+    "https://ghfast.top"
+    "https://jiashu.1win.eu.org"
+    "https://j.1win.ggff.net"
+    "https://gh-proxy.com"
+    "https://gh-proxy.net"
+    "DIRECT"
+)
+
+target_url="https://raw.githubusercontent.com/soloxiaoye2022/server_install/main/server_install/linux/init.sh"
+temp_file="/tmp/l4m_new.sh"
+rm -f "$temp_file"
+
+success=false
+
+for m in "${MIRRORS[@]}"; do
+    url="$target_url"
+    if [ "$m" != "DIRECT" ]; then url="${m}/${target_url}"; fi
+    
+    echo -e "尝试线路: ${GREEN}$m${NC}"
+    if curl -L -f --connect-timeout 10 -m 60 -o "$temp_file" "$url" || wget --no-check-certificate -T 10 -t 2 -O "$temp_file" "$url"; then
+        # 校验
+        fsize=$(wc -c < "$temp_file" 2>/dev/null || echo 0)
+        if grep -q "main()" "$temp_file" && [ "$fsize" -gt 10240 ]; then
+            echo -e "${GREEN}下载成功，正在应用更新...${NC}"
+            
+            # 确定安装位置
+            install_path=""
+            if [ -f "/usr/local/l4d2_manager/l4m" ]; then install_path="/usr/local/l4d2_manager/l4m"; 
+            elif [ -f "$HOME/.l4d2_manager/l4m" ]; then install_path="$HOME/.l4d2_manager/l4m"; fi
+            
+            if [ -n "$install_path" ]; then
+                mv "$temp_file" "$install_path"
+                chmod +x "$install_path"
+                echo -e "${GREEN}更新完成！请运行 l4m 查看。${NC}"
+                success=true
+                break
+            else
+                echo -e "${RED}未找到现有的安装，更新未应用。${NC}"
+                rm "$temp_file"
+                break
+            fi
+        else
+            echo -e "${RED}校验失败 (文件过小或内容不完整)${NC}"
+            rm "$temp_file"
+        fi
+    else
+        echo -e "${RED}连接失败${NC}"
+    fi
+done
+
+if [ "$success" = false ]; then
+    echo -e "${RED}所有线路均更新失败，请检查网络。${NC}"
+    exit 1
+fi
+EOF
+    chmod +x "$path"
+}
+
 check_port() {
     local port="$1"
     if command -v lsof >/dev/null; then lsof -i ":$port" >/dev/null 2>&1; return $?; fi
@@ -500,16 +570,21 @@ tui_menu() {
         local box_title="${MENU_TITLE:-$M_TITLE}"
         
         local choice
-        choice=$(whiptail --title "$box_title" --menu "$clean_title" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
-        
-        if [ $? -eq 0 ]; then
+        if choice=$(whiptail --title "$box_title" --menu "$clean_title" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3); then
             return $((choice-1))
         else
-            return 255
+            # 只有当用户明确取消 (exit 1) 或 ESC (exit 255) 时才返回错误
+            # 如果是 whiptail 执行错误 (例如参数不对)，尝试 fallback
+            local ret=$?
+            if [ $ret -eq 255 ] || [ $ret -eq 1 ]; then
+                return 255
+            fi
+            # 其他错误码 (如 127, 139 等) 则进入 fallback
         fi
-    else
-        # Fallback: 纯文本菜单
-        tui_header
+    fi
+
+    # Fallback: 纯文本菜单 (当 whiptail 不存在或执行崩溃时)
+    tui_header
         echo -e "${CYAN}$t${NC}"
         for ((i=0; i<tot; i++)); do
             echo -e "${GREEN}$((i+1)).${NC} ${opts[i]}"
@@ -630,6 +705,14 @@ install_smart() {
     if [[ "$link_path" == "$USER_BIN" ]] && [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
         MENU_TITLE="$M_INIT_INSTALL" tui_msgbox "$M_ADD_PATH"
     fi
+
+    # 生成独立更新器
+    local updater_path="$target_dir/updater.sh"
+    generate_updater "$updater_path"
+    
+    # 创建 update 别名链接
+    local link_dir=$(dirname "$link_path")
+    ln -sf "$updater_path" "$link_dir/l4m-update"
 
     MENU_TITLE="$M_INIT_INSTALL" tui_msgbox "$M_INSTALL_DONE"
     exec "$target_dir/l4m"
@@ -2274,9 +2357,15 @@ dep_manager_menu() {
 #=============================================================================
 main() {
     chmod +x "$0"
+    
+    # 快速通道：如果参数是 update，直接调用自我更新逻辑，不加载 TUI
+    if [ "$1" == "update" ]; then
+        self_update
+        exit 0
+    fi
+
     case "$1" in
         "install") install_smart; exit 0 ;;
-        "update") self_update; exit 0 ;;
         "resume") resume_all; exit 0 ;;
         "monitor") traffic_daemon; exit 0 ;;
     esac
