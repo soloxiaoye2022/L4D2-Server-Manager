@@ -153,15 +153,10 @@ check_port() {
 # 定义镜像源列表
 MIRRORS=(
     "https://ghfast.top"
-    "https://git.yylx.win"
-    "https://gh-proxy.com"
-    "https://ghfile.geekertao.top"
-    "https://gh-proxy.net"
-    "https://j.1win.ggff.net"
-    "https://ghm.078465.xyz"
-    "https://gitproxy.127731.xyz"
     "https://jiashu.1win.eu.org"
-    "https://github.tbedu.top"
+    "https://j.1win.ggff.net"
+    "https://gh-proxy.com"
+    "https://gh-proxy.net"
     "DIRECT" # 直连作为保底
 )
 BEST_MIRROR=""
@@ -230,6 +225,14 @@ download_file() {
     local save_path="$2"
     local desc="$3"
     
+    # 鲁棒性处理: 如果传入的 git_path 已经包含了常见的代理前缀，则尝试移除它们
+    # 这可以防止双重代理导致的 URL 错误
+    if [[ "$git_path" == *"/https://"* ]]; then
+        git_path="${git_path##*/https://}"
+        # 恢复 https:// 前缀如果被截断后只是 raw.github...
+        if [[ "$git_path" != http* ]]; then git_path="https://$git_path"; fi
+    fi
+    
     select_best_mirror
     
     echo -e "${CYAN}正在下载: $desc${NC}"
@@ -252,6 +255,8 @@ download_file() {
         target_raw_url="https://raw.githubusercontent.com/${dir_path}${encoded_name}"
         target_media_url="https://media.githubusercontent.com/media/${dir_path}${encoded_name}"
     fi
+    
+    echo -e "${GREY}  [Debug] Target: $target_raw_url${NC}"
 
     # 构建尝试列表
     local try_list=("$BEST_MIRROR")
