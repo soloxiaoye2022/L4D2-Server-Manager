@@ -1388,6 +1388,7 @@ load_i18n() {
         M_UPDATE="系统更新"
         M_DEPS="依赖管理 / 换源"
         M_LANG="切换语言 / Language"
+        M_UNINSTALL_MENU="卸载 / 重置系统"
         M_EXIT="退出"
         M_SUCCESS="${GREEN}[成功]${NC}"
         M_FAILED="${RED}[失败]${NC}"
@@ -1494,6 +1495,12 @@ load_i18n() {
         M_FOUND_EXISTING="检测到系统已安装 L4M，正在启动..."
         M_UPDATE_CACHE="${CYAN}正在更新服务端缓存 (首次可能较慢)...${NC}"
         M_COPY_CACHE="${CYAN}正在从缓存部署实例 (本地复制)...${NC}"
+        M_UN_CONF_ONLY="1. 仅重置系统配置 (保留服务器数据)"
+        M_UN_INST_ONLY="2. 仅删除所有服务器实例 (保留系统配置)"
+        M_UN_FULL="3. 完全卸载 (删除所有数据和程序)"
+        M_UN_CONFIRM="${RED}确定要执行此操作吗？此操作不可逆！${NC}"
+        M_UN_DONE="${GREEN}操作已完成。${NC}"
+        M_UN_FULL_DONE="${GREEN}L4M 已完全卸载。再见！${NC}"
     else
         M_TITLE="=== L4D2 Manager (L4M) ==="
         M_WELCOME="Welcome to L4D2 Server Manager (L4M)"
@@ -1510,6 +1517,7 @@ load_i18n() {
         M_UPDATE="Update System"
         M_DEPS="Dependencies / Mirrors"
         M_LANG="Language"
+        M_UNINSTALL_MENU="Uninstall / Reset"
         M_EXIT="Exit"
         M_SUCCESS="${GREEN}[Success]${NC}"
         M_FAILED="${RED}[Failed]${NC}"
@@ -1616,6 +1624,12 @@ load_i18n() {
         M_FOUND_EXISTING="Found existing installation, starting..."
         M_UPDATE_CACHE="${CYAN}Updating cache...${NC}"
         M_COPY_CACHE="${CYAN}Deploying from cache...${NC}"
+        M_UN_CONF_ONLY="1. Reset System Config Only (Keep Servers)"
+        M_UN_INST_ONLY="2. Delete All Server Instances (Keep Config)"
+        M_UN_FULL="3. Full Uninstall (Remove Everything)"
+        M_UN_CONFIRM="${RED}Are you sure? This is irreversible!${NC}"
+        M_UN_DONE="${GREEN}Operation completed.${NC}"
+        M_UN_FULL_DONE="${GREEN}L4M has been uninstalled. Goodbye!${NC}"
     fi
 }
 
@@ -2305,6 +2319,74 @@ dep_manager_menu() {
     done
 }
 
+uninstall_menu() {
+    MENU_TITLE="$M_UNINSTALL_MENU"
+    tui_menu "$M_UNINSTALL_MENU" \
+        "$M_UN_CONF_ONLY" \
+        "$M_UN_INST_ONLY" \
+        "$M_UN_FULL" \
+        "$M_RETURN"
+    
+    local choice=$?
+    if [ $choice -eq 3 ] || [ $choice -eq 255 ]; then return; fi
+    
+    # Confirm
+    MENU_TITLE="$M_UNINSTALL_MENU"
+    tui_menu "$M_UN_CONFIRM" "1. Yes" "2. No"
+    if [ $? -ne 0 ]; then return; fi
+    
+    case $choice in
+        0) # Reset Config
+            rm -f "$CONFIG_FILE" "$PLUGIN_CONFIG"
+            MENU_TITLE="$M_UNINSTALL_MENU" tui_msgbox "$M_UN_DONE"
+            exit 0
+            ;;
+        1) # Delete Instances
+            if [ -f "$DATA_FILE" ]; then
+                while IFS='|' read -r n p s port auto; do
+                    if [ -n "$n" ]; then stop_srv "$n"; fi
+                done < "$DATA_FILE"
+                
+                while IFS='|' read -r n p s port auto; do
+                    if [ -n "$p" ] && [ -d "$p" ]; then rm -rf "$p"; fi
+                done < "$DATA_FILE"
+            fi
+            
+            > "$DATA_FILE"
+            rm -f "$TRAFFIC_DIR"/*.csv
+            
+            MENU_TITLE="$M_UNINSTALL_MENU" tui_msgbox "$M_UN_DONE"
+            ;;
+        2) # Full Uninstall
+            if [ -f "$DATA_FILE" ]; then
+                while IFS='|' read -r n p s port auto; do
+                    if [ -n "$n" ]; then stop_srv "$n"; fi
+                done < "$DATA_FILE"
+                
+                while IFS='|' read -r n p s port auto; do
+                    if [ -n "$p" ] && [ -d "$p" ]; then rm -rf "$p"; fi
+                done < "$DATA_FILE"
+            fi
+            
+            if [ -d "$FINAL_ROOT" ]; then rm -rf "$FINAL_ROOT"; fi
+            
+            rm -f "/usr/bin/l4m" "/usr/bin/l4m-update" "$HOME/bin/l4m" "$HOME/bin/l4m-update"
+            
+            if [ "$EUID" -eq 0 ]; then
+                systemctl disable --now l4m-resume.service 2>/dev/null
+                systemctl disable --now l4m-monitor.service 2>/dev/null
+                rm -f /etc/systemd/system/l4m-resume.service /etc/systemd/system/l4m-monitor.service
+                systemctl daemon-reload
+            else
+                crontab -l 2>/dev/null | grep -v "l4m resume" | crontab -
+            fi
+            
+            echo -e "$M_UN_FULL_DONE"
+            exit 0
+            ;;
+    esac
+}
+
 #=============================================================================
 # 8. Main Entry
 #=============================================================================
@@ -2371,9 +2453,9 @@ main() {
     if [ ! -f "$DATA_FILE" ]; then touch "$DATA_FILE"; fi
     
     while true; do
-        tui_menu "$M_MAIN_MENU" "$M_DEPLOY" "$M_MANAGE" "$M_DOWNLOAD_PACKAGES" "$M_DEPS" "$M_UPDATE" "$M_LANG" "$M_EXIT"
+        tui_menu "$M_MAIN_MENU" "$M_DEPLOY" "$M_MANAGE" "$M_DOWNLOAD_PACKAGES" "$M_DEPS" "$M_UPDATE" "$M_LANG" "$M_UNINSTALL_MENU" "$M_EXIT"
         case $? in
-            0) deploy_wizard ;; 1) manage_menu ;; 2) download_packages ;; 3) dep_manager_menu ;; 4) self_update ;; 5) change_lang ;; 6|255) exit 0 ;;
+            0) deploy_wizard ;; 1) manage_menu ;; 2) download_packages ;; 3) dep_manager_menu ;; 4) self_update ;; 5) change_lang ;; 6) uninstall_menu ;; 7|255) exit 0 ;;
         esac
     done
 }
