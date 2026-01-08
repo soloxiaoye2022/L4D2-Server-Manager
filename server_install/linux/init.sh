@@ -55,7 +55,9 @@ fi
 if [[ "$INSTALL_TYPE" != "temp" ]]; then
     FINAL_ROOT="$MANAGER_ROOT"
 else
-    if [ "$EUID" -eq 0 ]; then FINAL_ROOT="$SYSTEM_INSTALL_DIR"; else FINAL_ROOT="$USER_INSTALL_DIR"; fi
+    # 临时模式下，为了避免未安装前污染系统目录，先将根目录指向临时目录
+    # 在执行 install_smart 时会将配置文件复制到真实系统目录
+    FINAL_ROOT="$MANAGER_ROOT"
 fi
 
 # 数据文件路径
@@ -488,8 +490,10 @@ install_smart() {
         echo -e "$M_LINK_FAIL l4m='$target_dir/l4m'"
     fi
     
-    if [ "$MANAGER_ROOT" != "$target_dir" ] && [ -f "${MANAGER_ROOT}/servers.dat" ]; then
-         cp "${MANAGER_ROOT}/servers.dat" "$target_dir/"
+    if [ "$MANAGER_ROOT" != "$target_dir" ]; then
+         if [ -f "${MANAGER_ROOT}/servers.dat" ]; then cp "${MANAGER_ROOT}/servers.dat" "$target_dir/"; fi
+         if [ -f "${MANAGER_ROOT}/config.dat" ]; then cp "${MANAGER_ROOT}/config.dat" "$target_dir/"; fi
+         if [ -f "${MANAGER_ROOT}/plugin_config.dat" ]; then cp "${MANAGER_ROOT}/plugin_config.dat" "$target_dir/"; fi
     fi
     touch "$target_dir/servers.dat"
     
@@ -1522,80 +1526,14 @@ view_log() {
 }
 
 edit_args() {
-    local s="$1/run_guard.sh"
-    local c=$(grep "./srcds_run" "$s")
-    
-    while true; do
-        # Parse current values
-        local curr_port=$(echo "$c" | grep -oP "(?<=-port )\d+" || echo "N/A")
-        local curr_map=$(echo "$c" | grep -oP "(?<= \+map )[^ ]+" || echo "N/A")
-        local curr_max=$(echo "$c" | grep -oP "(?<= \+maxplayers )\d+" || echo "N/A")
-        local curr_tick=$(echo "$c" | grep -oP "(?<=-tickrate )\d+" || echo "N/A")
-        
-        MENU_TITLE="配置启动参数" \
-        tui_menu "当前启动指令:\n$c\n\n请选择要修改的参数:" \
-            "修改地图 (Current: $curr_map)" \
-            "修改端口 (Current: $curr_port)" \
-            "修改最大人数 (Current: $curr_max)" \
-            "修改 Tickrate (Current: $curr_tick)" \
-            "手动编辑完整指令 (Advanced)" \
-            "返回"
-            
-        case $? in
-            0) 
-                local new_val; tui_input "请输入新地图名称 (如 c2m1_highway):" "$curr_map" "new_val"
-                if [ -n "$new_val" ] && [ "$new_val" != "N/A" ]; then
-                    if [[ "$c" == *"+map"* ]]; then
-                        c=$(echo "$c" | sed "s/+map [^ ]*/+map $new_val/")
-                    else
-                        c="$c +map $new_val"
-                    fi
-                fi
-                ;;
-            1)
-                local new_val; tui_input "请输入新端口 (如 27015):" "$curr_port" "new_val"
-                if [ -n "$new_val" ] && [ "$new_val" != "N/A" ]; then
-                    if [[ "$c" == *"-port"* ]]; then
-                        c=$(echo "$c" | sed "s/-port [0-9]*/-port $new_val/")
-                    else
-                        c="$c -port $new_val"
-                    fi
-                fi
-                ;;
-            2)
-                local new_val; tui_input "请输入最大人数 (如 8):" "$curr_max" "new_val"
-                if [ -n "$new_val" ] && [ "$new_val" != "N/A" ]; then
-                    if [[ "$c" == *"+maxplayers"* ]]; then
-                        c=$(echo "$c" | sed "s/+maxplayers [0-9]*/+maxplayers $new_val/")
-                    else
-                        c="$c +maxplayers $new_val"
-                    fi
-                fi
-                ;;
-            3)
-                local new_val; tui_input "请输入 Tickrate (如 60/100):" "$curr_tick" "new_val"
-                if [ -n "$new_val" ] && [ "$new_val" != "N/A" ]; then
-                    if [[ "$c" == *"-tickrate"* ]]; then
-                        c=$(echo "$c" | sed "s/-tickrate [0-9]*/-tickrate $new_val/")
-                    else
-                        c="$c -tickrate $new_val"
-                    fi
-                fi
-                ;;
-            4)
-                tui_input "编辑完整指令:" "$c" "new_val"
-                if [ -n "$new_val" ]; then c="$new_val"; fi
-                ;;
-            5|255) break ;;
-        esac
-        
-        # Apply changes to file immediately
-        if [ -n "$c" ]; then
-            local esc=$(printf '%s\n' "$c" | sed 's:[][\/.^$*]:\\&:g')
-            sed -i "s|^\./srcds_run.*|$c|" "$s"
-        fi
-    done
-    echo -e "$M_SAVED"; sleep 1
+    local s="$1/run_guard.sh"; local c=$(grep "./srcds_run" "$s")
+    tui_header; echo -e "$M_CURRENT $c\n$M_NEW_CMD"
+    read -e -i "$c" new
+    if [ -n "$new" ]; then
+        local esc=$(printf '%s\n' "$new" | sed 's:[][\/.^$*]:\\&:g')
+        sed -i "s|^\./srcds_run.*|$new|" "$s"; echo -e "$M_SAVED"
+    fi
+    sleep 1
 }
 
 toggle_auto() {
