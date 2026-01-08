@@ -369,15 +369,31 @@ tui_msgbox() {
     local t="$1"
     
     if command -v whiptail >/dev/null 2>&1; then
-        local h=$(tput lines)
-        local w=$(tput cols)
-        # 调整最大尺寸，使界面更紧凑居中
-        if [ $h -gt 20 ]; then h=20; fi
-        if [ $w -gt 70 ]; then w=70; fi
-        
         # 移除颜色代码
-        local clean_t=$(echo "$t" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
+        local clean_t=$(echo -e "$t" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
         local box_title="${MENU_TITLE:-$M_TITLE}"
+        
+        # 计算最长行的长度
+        local max_line_len=0
+        while IFS= read -r line; do
+            local len=${#line}
+            if [ $len -gt $max_line_len ]; then max_line_len=$len; fi
+        done <<< "$clean_t"
+        
+        # 基础宽度 = 最长行 + 边框填充(大约15)
+        local w=$((max_line_len + 15))
+        
+        # 限制最小/最大宽度
+        local term_cols=$(tput cols)
+        if [ $w -lt 40 ]; then w=40; fi
+        if [ $w -gt $((term_cols - 4)) ]; then w=$((term_cols - 4)); fi
+        
+        # 自动计算高度
+        local line_count=$(echo "$clean_t" | wc -l)
+        # 基础高度 = 行数 + 标题栏/按钮栏/边框(大约8)
+        local h=$((line_count + 8))
+        local term_lines=$(tput lines)
+        if [ $h -gt $((term_lines - 4)) ]; then h=$((term_lines - 4)); fi
         
         whiptail --title "$box_title" --msgbox "$clean_t" $h $w
     else
@@ -417,22 +433,37 @@ tui_menu() {
     
     if command -v whiptail >/dev/null 2>&1; then
         # 修复: 清理标题中的颜色代码，防止 whiptail 显示乱码
-        local clean_title=$(echo "$t" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
+        local clean_title=$(echo -e "$t" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
+        local max_len=${#clean_title}
         
         local args=()
         for ((i=0; i<tot; i++)); do
             # 移除颜色代码
             local clean_opt=$(echo "${opts[i]}" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
-            # 修复: 移除可能存在的 "1. " 序号前缀，防止与 whiptail 的 tag 重复显示 (如 "1 1. 选项")
+            # 修复: 移除可能存在的 "1. " 序号前缀
             clean_opt=$(echo "$clean_opt" | sed 's/^[0-9]*[.]\s*//')
+            
+            # 计算最大长度
+            local len=${#clean_opt}
+            if [ $len -gt $max_len ]; then max_len=$len; fi
+            
             args+=("$((i+1))" "${clean_opt}")
         done
         
-        local h=$(tput lines)
-        local w=$(tput cols)
-        # 优化: 限制最大宽度为 70，确保菜单在屏幕中间显示更紧凑（视觉居中）
+        # 基础宽度 = 最长选项 + 序号占位(5) + 边框填充(15)
+        local w=$((max_len + 20))
+        
+        # Constraints
+        local term_cols=$(tput cols)
+        local term_lines=$(tput lines)
+        
+        if [ $w -lt 50 ]; then w=50; fi
+        if [ $w -gt $((term_cols - 4)) ]; then w=$((term_cols - 4)); fi
+        
+        # 高度计算
+        local h=$((term_lines - 4))
         if [ $h -gt 30 ]; then h=30; fi
-        if [ $w -gt 70 ]; then w=70; fi
+        
         local list_h=$((h - 10))
         if [ $list_h -lt 5 ]; then list_h=5; fi
         
