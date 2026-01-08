@@ -583,7 +583,18 @@ deploy_wizard() {
     done
     
     tui_header; echo "$M_LOGIN_ANON"; echo "$M_LOGIN_ACC"
-    local mode; tui_input "$M_SELECT_1_2" "1" "mode"
+    
+    MENU_TITLE="$M_DEPLOY" \
+    tui_menu "请选择 Steam 登录方式:" \
+        "1. 匿名登录 (Anonymous) - 推荐" \
+        "2. 账号登录 (Steam Account)"
+        
+    local mode
+    case $? in
+        0) mode="1" ;;
+        1) mode="2" ;;
+        *) mode="1" ;;
+    esac
     
     # 1. Update Cache
     install_steamcmd
