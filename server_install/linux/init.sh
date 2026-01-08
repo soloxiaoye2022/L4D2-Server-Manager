@@ -2411,8 +2411,9 @@ main() {
             "1. English" \
             "2. 简体中文"
             
+        local choice=$?
         local l="1"
-        if [ $? -eq 1 ]; then l="2"; fi
+        if [ $choice -eq 1 ]; then l="2"; fi
         
         # 确保目录存在
         mkdir -p "$(dirname "$CONFIG_FILE")"
