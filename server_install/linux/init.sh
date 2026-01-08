@@ -413,19 +413,26 @@ tui_input() {
         local type="--inputbox"
         if [ "$pass" == "true" ]; then type="--passwordbox"; fi
         
+        # 移除颜色代码，防止 whiptail 标题乱码
+        local clean_p=$(echo -e "$p" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
+        local box_title="${MENU_TITLE:-$M_TITLE}"
+        
         local val
-        val=$(whiptail --title "$M_TITLE" "$type" "$p" $h $w "$d" 3>&1 1>&2 2>&3)
+        val=$(whiptail --title "$box_title" "$type" "$clean_p" $h $w "$d" 3>&1 1>&2 2>&3)
+        
         if [ $? -eq 0 ]; then
             eval $v=\"\$val\"
+            return 0
         else
             eval $v=""
+            return 1 # 返回非0表示用户取消
         fi
-        return
     fi
 
     if [ -n "$d" ]; then echo -e "${YELLOW}$p ${GREY}[默认: $d]${NC}"; else echo -e "${YELLOW}$p${NC}"; fi
     if [ "$pass" == "true" ]; then read -s -p "> " i; echo ""; else read -p "> " i; fi
     if [ -z "$i" ] && [ -n "$d" ]; then eval $v="$d"; else eval $v=\"\$i\"; fi
+    return 0 # 纯文本模式暂时无法区分取消，默认成功
 }
 
 tui_menu() {
@@ -640,24 +647,22 @@ install_steamcmd() {
 }
 
 deploy_wizard() {
-    tui_header; echo -e "${GREEN}$M_DEPLOY${NC}"
+    MENU_TITLE="$M_DEPLOY"
     local name=""; while [ -z "$name" ]; do
-        tui_input "$M_SRV_NAME" "l4d2_srv_1" "name"
+        if ! tui_input "$M_SRV_NAME" "l4d2_srv_1" "name"; then return; fi
         if grep -q "^${name}|" "$DATA_FILE"; then MENU_TITLE="$M_DEPLOY" tui_msgbox "$M_NAME_EXIST"; name=""; fi
     done
     
     local def_path="$HOME/L4D2_Servers/${name}"
     
     local path=""; while [ -z "$path" ]; do
-        tui_input "$M_INSTALL_DIR" "$def_path" "path"
+        if ! tui_input "$M_INSTALL_DIR" "$def_path" "path"; then return; fi
         path="${path/#\~/$HOME}"
         if [ -d "$path" ] && [ "$(ls -A "$path")" ]; then MENU_TITLE="$M_DEPLOY" tui_msgbox "$M_DIR_NOT_EMPTY"; path=""; fi
     done
     
-    tui_header; echo "$M_LOGIN_ANON"; echo "$M_LOGIN_ACC"
-    
     MENU_TITLE="$M_DEPLOY" \
-    tui_menu "请选择 Steam 登录方式:" \
+    tui_menu "$M_LOGIN_ANON\n$M_LOGIN_ACC\n\n请选择 Steam 登录方式:" \
         "1. 匿名登录 (Anonymous) - 推荐" \
         "2. 账号登录 (Steam Account)"
         
@@ -678,7 +683,9 @@ deploy_wizard() {
     
     local cache_script="${SERVER_CACHE_DIR}/update_cache.txt"
     if [ "$mode" == "2" ]; then
-        local u p; tui_input "$M_ACC" "" "u"; tui_input "$M_PASS" "" "p" "true"
+        local u p; 
+        if ! tui_input "$M_ACC" "" "u"; then return; fi
+        if ! tui_input "$M_PASS" "" "p" "true"; then return; fi
         echo "force_install_dir \"$SERVER_CACHE_DIR\"" > "$cache_script"
         echo "login $u $p" >> "$cache_script"
         echo "@sSteamCmdForcePlatformType linux" >> "$cache_script"
@@ -1194,7 +1201,6 @@ plugins_menu() {
 }
 
 set_plugin_repo() {
-    tui_header; echo -e "$M_CUR_REPO $JS_MODS_DIR"
     local pkg_dir="${FINAL_ROOT}/downloaded_packages"
     
     MENU_TITLE="$M_PLUG_REPO" \
@@ -1250,10 +1256,11 @@ set_plugin_repo() {
             ;;
         2)
             local new
-            tui_input "$M_NEW_REPO_PROMPT" "$JS_MODS_DIR" "new"
-            if [ -n "$new" ]; then
-                JS_MODS_DIR="$new"; echo "$new" > "$PLUGIN_CONFIG"
-                mkdir -p "$new"; MENU_TITLE="$M_PLUG_REPO" tui_msgbox "$M_SAVED"
+            if tui_input "$M_NEW_REPO_PROMPT" "$JS_MODS_DIR" "new"; then
+                if [ -n "$new" ]; then
+                    JS_MODS_DIR="$new"; echo "$new" > "$PLUGIN_CONFIG"
+                    mkdir -p "$new"; MENU_TITLE="$M_PLUG_REPO" tui_msgbox "$M_SAVED"
+                fi
             fi
             sleep 1
             ;;
@@ -1416,13 +1423,127 @@ load_i18n() {
         M_UPDATE_CACHE="${CYAN}正在更新服务端缓存 (首次可能较慢)...${NC}"
         M_COPY_CACHE="${CYAN}正在从缓存部署实例 (本地复制)...${NC}"
     else
-        # 英文部分暂时省略以节省篇幅，如需英文支持请将之前的英文块复制回此处
         M_TITLE="=== L4D2 Manager (L4M) ==="
         M_WELCOME="Welcome to L4D2 Server Manager (L4M)"
-        # ... (使用上面的中文作为默认回退，或自行补充英文)
-        # 为保证脚本可用性，这里暂时复制中文变量
+        M_TEMP_RUN="Running in temporary mode (pipe/temp dir)."
+        M_REC_INSTALL="Recommended to install to system:"
+        M_F_PERSIST="  • ${GREEN}Persistence${NC}: Configs and data are saved safely."
+        M_F_ACCESS="  • ${GREEN}Easy Access${NC}: Type ${CYAN}l4m${NC} to manage anytime."
+        M_F_ADV="  • ${GREEN}Advanced${NC}: Auto-start, traffic monitor, etc."
+        M_ASK_INSTALL="Install to system now? (Y/n): "
+        M_TEMP_MODE="${GREY}Entering temporary mode...${NC}"
         M_MAIN_MENU="Main Menu"
-        # 实际项目中应完整保留英文，此处简化
+        M_DEPLOY="Deploy New Instance"
+        M_MANAGE="Manage Instances"
+        M_UPDATE="Update System"
+        M_DEPS="Dependencies / Mirrors"
+        M_LANG="Language"
+        M_EXIT="Exit"
+        M_SUCCESS="${GREEN}[Success]${NC}"
+        M_FAILED="${RED}[Failed]${NC}"
+        M_INIT_INSTALL="Initializing installation wizard..."
+        M_SYS_DIR_RO="${RED}System dir read-only, falling back to user dir...${NC}"
+        M_INSTALL_FAIL="${RED}Installation failed.${NC}"
+        M_NO_PERM="${RED}No permission${NC}"
+        M_INSTALL_PATH="Install Path:"
+        M_DL_SCRIPT="${YELLOW}Downloading latest script...${NC}"
+        M_DL_FAIL="${RED}Download failed${NC}"
+        M_LINK_CREATED="${GREEN}Link created:${NC}"
+        M_LINK_FAIL="${YELLOW}Cannot create link, please add alias manually${NC}"
+        M_ADD_PATH="${YELLOW}Please add $HOME/bin to PATH.${NC}"
+        M_INSTALL_DONE="${GREEN}Installation done! Type l4m to start.${NC}"
+        M_CHECK_UPDATE="${CYAN}Checking for updates...${NC}"
+        M_UPDATE_SUCCESS="${GREEN}Update successful!${NC}"
+        M_VERIFY_FAIL="${RED}Verification failed${NC}"
+        M_CONN_FAIL="${RED}Connection failed${NC}"
+        M_MISSING_DEPS="${YELLOW}Missing dependencies:${NC}"
+        M_TRY_SUDO="${CYAN}Trying sudo (password may be required)...${NC}"
+        M_INSTALL_OK="${GREEN}Installed successfully${NC}"
+        M_MANUAL_INSTALL="${RED}Cannot auto-install. Please run:${NC}"
+        M_NEED_ROOT="${RED}Root required${NC}"
+        M_TRAFFIC_STATS="${CYAN}Traffic Stats:${NC}"
+        M_REALTIME="Realtime:"
+        M_TODAY="Today:"
+        M_MONTH="Month:"
+        M_NO_HISTORY="No history data"
+        M_PRESS_KEY="${YELLOW}Press any key to return...${NC}"
+        M_INIT_STEAMCMD="${YELLOW}Initializing SteamCMD...${NC}"
+        M_DL_STEAMCMD="${CYAN}Downloading SteamCMD...${NC}"
+        M_EXTRACTING="${CYAN}Extracting...${NC}"
+        M_SRV_NAME="Server Name"
+        M_NAME_EXIST="${RED}Name exists${NC}"
+        M_INSTALL_DIR="Install Dir"
+        M_DIR_NOT_EMPTY="${RED}Dir not empty${NC}"
+        M_LOGIN_ANON="1. Anonymous"
+        M_LOGIN_ACC="2. Steam Account"
+        M_SELECT_1_2="Select (1/2)"
+        M_START_DL="${CYAN}Start downloading...${NC}"
+        M_ACC="Account"
+        M_PASS="Password"
+        M_NO_SRCDS="srcds_run not found, check SteamCMD errors."
+        M_SRV_READY="Server ready:"
+        M_ST_RUN="${GREEN}[RUNNING]${NC}"
+        M_ST_STOP="${RED}[STOPPED]${NC}"
+        M_ST_AUTO="${CYAN}[AUTO]${NC}"
+        M_NO_INSTANCE="${YELLOW}No Instance${NC}"
+        M_RETURN="Return"
+        M_SELECT_INSTANCE="Select Instance:"
+        M_OPT_START="Start"
+        M_OPT_STOP="Stop"
+        M_OPT_RESTART="Restart"
+        M_OPT_UPDATE="Update Server"
+        M_OPT_CONSOLE="Console"
+        M_OPT_LOGS="Logs"
+        M_OPT_TRAFFIC="Traffic Stats"
+        M_OPT_ARGS="Launch Args"
+        M_OPT_PLUGINS="Plugins"
+        M_OPT_BACKUP="Backup"
+        M_OPT_DELETE="Delete"
+        M_OPT_AUTO_ON="Enable Auto-Start"
+        M_OPT_AUTO_OFF="Disable Auto-Start"
+        M_STOP_BEFORE_UPDATE="${YELLOW}Stop server before update${NC}"
+        M_ASK_STOP_UPDATE="Stop and update now? (y/n): "
+        M_ASK_DELETE="${RED}Warning: Deleting instance '%s'${NC}\nPath: ${YELLOW}%s${NC}\nIrreversible!\nConfirm? (y/N): "
+        M_DELETE_OK="${GREEN}Instance '%s' deleted.${NC}"
+        M_DELETE_CANCEL="${YELLOW}Deletion cancelled.${NC}"
+        M_NO_UPDATE_SCRIPT="${RED}update.txt not found${NC}"
+        M_ASK_REBUILD="${YELLOW}Rebuild update script (Anonymous)? (y/n)${NC}"
+        M_CALL_STEAMCMD="${CYAN}Calling SteamCMD...${NC}"
+        M_UPDATED="Update Complete"
+        M_DEPLOY_FAIL="Deploy Failed"
+        M_PORT_OCCUPIED="${RED}Port occupied!${NC}"
+        M_START_SENT="${GREEN}Start command sent${NC}"
+        M_STOPPED="${GREEN}Stopped${NC}"
+        M_NOT_RUNNING="${RED}Not running${NC}"
+        M_DETACH_HINT="${YELLOW}Press Ctrl+B, D to detach${NC}"
+        M_NO_LOG="${RED}No log (check -condebug)${NC}"
+        M_CURRENT="${CYAN}Current:${NC}"
+        M_NEW_CMD="${YELLOW}New:${NC}"
+        M_SAVED="${GREEN}Saved${NC}"
+        M_AUTO_SET="${GREEN}Auto-start set to:${NC}"
+        M_BACKUP_START="${CYAN}Backing up (Metamod, Plugins, Data)...${NC}"
+        M_BACKUP_OK="${GREEN}Backup success:${NC}"
+        M_BACKUP_FAIL="${RED}Backup failed${NC}"
+        M_DIR_ERR="${RED}Dir Error${NC}"
+        M_PLUG_MANAGE="Manage Plugins"
+        M_PLUG_PLAT="Install Platform (SM/MM)"
+        M_PLUG_REPO="Set Plugin Repo"
+        M_INSTALLED_PLUGINS="Installed Plugins"
+        M_DOWNLOAD_PACKAGES="Download Packages"
+        M_SELECT_PACKAGES="Select Packages"
+        M_CUR_REPO="${CYAN}Current Repo:${NC}"
+        M_NEW_REPO_PROMPT="${YELLOW}New Path (Empty to cancel):${NC}"
+        M_REPO_NOT_FOUND="${RED}Repo not found:${NC}"
+        M_REPO_EMPTY="Repo empty"
+        M_INSTALLED="${GREY}[Installed]${NC}"
+        M_SELECT_HINT="${YELLOW}Space:Select Enter:Confirm${NC}"
+        M_DONE="${GREEN}Done${NC}"
+        M_LOCAL_PKG="${CYAN}Found local package, installing...${NC}"
+        M_CONN_OFFICIAL="${CYAN}Connecting to official site...${NC}"
+        M_GET_LINK_FAIL="${RED}[FAILED] Cannot get download link.${NC}"
+        M_FOUND_EXISTING="Found existing installation, starting..."
+        M_UPDATE_CACHE="${CYAN}Updating cache...${NC}"
+        M_COPY_CACHE="${CYAN}Deploying from cache...${NC}"
     fi
 }
 
@@ -2144,7 +2265,7 @@ main() {
              fi
         fi
     fi
-    if [ -f "$CONFIG_FILE" ]; then load_i18n $(cat "$CONFIG_FILE"); fi
+    if [ -f "$CONFIG_FILE" ]; then load_i18n $(cat "$CONFIG_FILE"); else load_i18n "en"; fi
     
     if [[ "$INSTALL_TYPE" == "temp" ]]; then
         local exist_path=""
