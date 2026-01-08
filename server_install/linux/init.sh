@@ -968,8 +968,9 @@ download_packages() {
         local args=()
         for ((j=0;j<${#pkg_array[@]};j++)); do
             # 移除颜色代码
-            local clean_name=$(echo "${pkg_array[j]}" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
-            args+=("${clean_name}" "" "OFF")
+            local clean_name=$(strip_colors "${pkg_array[j]}")
+            # 使用索引 j 作为 tag，确保唯一且不含空格
+            args+=("$j" "${clean_name}" "OFF")
         done
         
         local h=$(tput lines)
@@ -979,7 +980,8 @@ download_packages() {
         local list_h=$((h - 8))
         if [ $list_h -lt 5 ]; then list_h=5; fi
         
-        local clean_hint=$(echo "$M_SELECT_HINT" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
+        local clean_hint=$(strip_colors "$M_SELECT_HINT")
+        # Use index as tag to avoid issues with spaces/special chars in names
         choices=$(whiptail --title "$M_SELECT_PACKAGES" --checklist "$clean_hint" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
         
         if [ $? -ne 0 ]; then return; fi
@@ -991,13 +993,9 @@ download_packages() {
         # Removing quotes and matching
         choices="${choices//\"/}"
         
-        for choice in $choices; do
-            for ((j=0;j<${#pkg_array[@]};j++)); do
-                if [ "${pkg_array[j]}" == "$choice" ]; then
-                    sel[j]=1
-                    break
-                fi
-            done
+        # 修复: 直接使用 whiptail 返回的索引 (0 1 2...)，避免文件名带空格导致解析错误
+        for idx in $choices; do
+            sel[$idx]=1
         done
         
         # tot is needed for the processing loop below
