@@ -871,13 +871,13 @@ download_packages() {
     local pkg_dir="${FINAL_ROOT}/downloaded_packages"
     mkdir -p "$pkg_dir"
     
+    local choice
     MENU_TITLE="$M_DOWNLOAD_PACKAGES" \
     tui_menu "请选择操作:" \
         "1. 从 GitHub 镜像站下载 (网络)" \
         "2. 从本地仓库导入 (需手动输入路径)" \
         "$M_RETURN"
         
-    local choice
     case $? in
         0) choice="1" ;;
         1) choice="2" ;;
@@ -1106,6 +1106,23 @@ download_packages() {
                 
                 if [ "$unzip_success" = true ]; then
                     echo -e "${GREEN}解压完成: ${pkg}${NC}"
+                    
+                    # 修复: 检查并处理嵌套目录 (例如 Package/Package/JS-MODS -> Package/JS-MODS)
+                    # 防止解压后出现双重目录结构
+                    local num_files=$(find "${extract_root}" -mindepth 1 -maxdepth 1 | wc -l)
+                    if [ "$num_files" -eq 1 ]; then
+                        local single_dir=$(find "${extract_root}" -mindepth 1 -maxdepth 1 -type d)
+                        if [ -n "$single_dir" ]; then
+                            echo -e "${CYAN}检测到嵌套目录结构，正在自动优化...${NC}"
+                            # 移动子目录内容到根目录
+                            # 使用 dotglob 确保移动隐藏文件
+                            shopt -s dotglob
+                            mv "$single_dir"/* "${extract_root}/" 2>/dev/null
+                            shopt -u dotglob
+                            rmdir "$single_dir" 2>/dev/null
+                        fi
+                    fi
+                    
                     echo -e "${CYAN}文件已保存至: ${extract_root}${NC}"
                     
                     rm -f "$dest"
@@ -1174,10 +1191,18 @@ manage_plugins() {
     local t="$1/left4dead2"
     local rec_dir="$1/.plugin_records"
     
+    # 0. 智能修正路径 (修复用户选择了父目录的问题)
+    # 如果当前路径下包含 JS-MODS 目录，说明用户选了外层目录，自动修正进入 JS-MODS
+    if [ -n "$JS_MODS_DIR" ] && [ -d "$JS_MODS_DIR/JS-MODS" ]; then
+        JS_MODS_DIR="${JS_MODS_DIR}/JS-MODS"
+        # 更新配置
+        echo "$JS_MODS_DIR" > "$PLUGIN_CONFIG"
+    fi
+    
     # 1. 检查插件库设置是否有效
     local current_repo_valid=false
     if [ -n "$JS_MODS_DIR" ] && [ -d "$JS_MODS_DIR" ]; then
-        # 简单检查：目录下有子目录
+        # 严格检查：必须包含至少一个子目录 (插件)，且该目录本身不是 JS-MODS (已在上面修正)
         if [ "$(find "$JS_MODS_DIR" -mindepth 1 -maxdepth 1 -type d | head -1)" ]; then
             current_repo_valid=true
         fi
@@ -1412,13 +1437,13 @@ plugins_menu() {
 set_plugin_repo() {
     local pkg_dir="${FINAL_ROOT}/downloaded_packages"
     
+    local choice
     MENU_TITLE="$M_PLUG_REPO" \
     tui_menu "$M_CUR_REPO $JS_MODS_DIR\n\n请选择操作:" \
         "1. 选择已下载的插件整合包" \
         "2. 手动输入插件库目录" \
         "3. 返回"
         
-    local choice
     case $? in
         0) choice="1" ;;
         1) choice="2" ;;
@@ -2578,6 +2603,7 @@ change_repo_source() {
         return
     fi
     
+    local choice
     MENU_TITLE="Linux 智能换源助手" \
     tui_menu "检测到系统: ${GREEN}${dist} ${ver} (${code})${NC}\n请选择要更换的国内源:" \
         "阿里云 (Aliyun) - 推荐" \
@@ -2586,7 +2612,6 @@ change_repo_source() {
         "还原官方源 (Restore)" \
         "返回"
     
-    local choice
     case $? in
         0) choice="1" ;;
         1) choice="2" ;;
