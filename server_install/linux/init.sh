@@ -24,6 +24,11 @@ setup_env() {
         M_REPO_SELECT_TITLE="Multiple Valid Packages Found"
         M_REPO_SELECT_MSG="Please select one as current repo:"
         M_NO_VALID_PKG="${RED}No valid package found (must contain JS-MODS).${NC}"
+        M_REPO_INVALID_HAS_LOCAL="Plugin repo invalid, but found local packages with JS-MODS.\nGo to select one?"
+        M_REPO_INVALID_NO_LOCAL="Plugin repo invalid and no local packages found.\nGo to download?"
+        M_GO_SELECT_REPO="Select Repo"
+        M_GO_DOWNLOAD="Download Packages"
+        M_REPO_STILL_INVALID="Repo still invalid, cannot manage plugins."
     fi
 }
 setup_env
@@ -1169,32 +1174,56 @@ manage_plugins() {
     local t="$1/left4dead2"
     local rec_dir="$1/.plugin_records"
     
-    # 检查插件库设置是否有效 (必须包含 JS-MODS 目录或自身即为 JS-MODS 结构，但这里我们统一要求 JS_MODS_DIR 变量指向 .../JS-MODS)
-    # 同时检查目录是否为空
-    local need_download=false
-    
-    if [ -z "$JS_MODS_DIR" ] || [ ! -d "$JS_MODS_DIR" ]; then
-        need_download=true
-    else
-        # 检查目录下是否有子目录 (插件)
-        local plugin_count=$(find "$JS_MODS_DIR" -mindepth 1 -maxdepth 1 -type d | head -1 | wc -l)
-        if [ "$plugin_count" -eq 0 ]; then
-            need_download=true
+    # 1. 检查插件库设置是否有效
+    local current_repo_valid=false
+    if [ -n "$JS_MODS_DIR" ] && [ -d "$JS_MODS_DIR" ]; then
+        # 简单检查：目录下有子目录
+        if [ "$(find "$JS_MODS_DIR" -mindepth 1 -maxdepth 1 -type d | head -1)" ]; then
+            current_repo_valid=true
         fi
     fi
     
-    if [ "$need_download" = true ]; then
-        MENU_TITLE="$M_PLUG_MANAGE" \
-        tui_menu "$M_NO_REPO_ASK_DL" \
-            "1. 是 (Yes)" \
-            "2. 否 (No)"
+    if [ "$current_repo_valid" = false ]; then
+        # 2. 扫描本地是否有有效包 (包含 JS-MODS)
+        local has_local=false
+        local pkg_dir="${FINAL_ROOT}/downloaded_packages"
+        if [ -d "$pkg_dir" ] && find "$pkg_dir" -mindepth 2 -maxdepth 2 -type d -name "JS-MODS" | grep -q .; then
+            has_local=true
+        fi
+        
+        if [ "$has_local" = true ]; then
+            # 有本地包 -> 提示去选择
+            MENU_TITLE="$M_PLUG_MANAGE" \
+            tui_menu "$M_REPO_INVALID_HAS_LOCAL" \
+                "1. $M_GO_SELECT_REPO" \
+                "2. $M_RETURN"
             
-        if [ $? -eq 0 ]; then
-            download_packages
-            # 下载流程结束后再次检查
-            if [ -z "$JS_MODS_DIR" ] || [ ! -d "$JS_MODS_DIR" ]; then return; fi
+            if [ $? -eq 0 ]; then
+                set_plugin_repo
+            else
+                return
+            fi
         else
-            return
+            # 无本地包 -> 提示去下载
+            MENU_TITLE="$M_PLUG_MANAGE" \
+            tui_menu "$M_REPO_INVALID_NO_LOCAL" \
+                "1. $M_GO_DOWNLOAD" \
+                "2. $M_RETURN"
+            
+            if [ $? -eq 0 ]; then
+                download_packages
+                # download_packages 可能会自动设置
+            else
+                return
+            fi
+        fi
+        
+        # 3. 再次检查 (刷新配置)
+        if [ -f "$PLUGIN_CONFIG" ]; then JS_MODS_DIR=$(cat "$PLUGIN_CONFIG"); fi
+        
+        if [ -z "$JS_MODS_DIR" ] || [ ! -d "$JS_MODS_DIR" ]; then
+             MENU_TITLE="$M_PLUG_MANAGE" tui_msgbox "$M_REPO_STILL_INVALID"
+             return
         fi
     fi
     
@@ -1626,6 +1655,11 @@ load_i18n() {
         M_REPO_SELECT_TITLE="检测到多个有效插件包"
         M_REPO_SELECT_MSG="请选择一个作为当前使用的插件库:"
         M_NO_VALID_PKG="${RED}未找到包含 JS-MODS 结构的有效插件包。${NC}"
+        M_REPO_INVALID_HAS_LOCAL="当前插件库无效，但检测到本地已下载了包含 JS-MODS 的整合包。\n是否前往选择？"
+        M_REPO_INVALID_NO_LOCAL="当前插件库无效，且本地未找到符合结构 (JS-MODS) 的整合包。\n是否前往下载？"
+        M_GO_SELECT_REPO="前往选择插件库"
+        M_GO_DOWNLOAD="前往下载插件包"
+        M_REPO_STILL_INVALID="插件库仍未正确设置，无法管理插件。"
     else
         M_TITLE="=== L4D2 Manager (L4M) ==="
         M_WELCOME="Welcome to L4D2 Server Manager (L4M)"
