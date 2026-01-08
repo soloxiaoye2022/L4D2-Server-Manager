@@ -365,6 +365,28 @@ tui_header() {
     clear; echo -e "${BLUE}$M_TITLE${NC}\n"; 
 }
 
+tui_msgbox() {
+    local t="$1"
+    
+    if command -v whiptail >/dev/null 2>&1; then
+        local h=$(tput lines)
+        local w=$(tput cols)
+        if [ $h -gt 35 ]; then h=35; fi
+        if [ $w -gt 160 ]; then w=160; fi
+        
+        # 移除颜色代码
+        local clean_t=$(echo "$t" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
+        local box_title="${MENU_TITLE:-$M_TITLE}"
+        
+        whiptail --title "$box_title" --msgbox "$clean_t" $h $w
+    else
+        tui_header
+        echo -e "${YELLOW}$t${NC}"
+        echo -e "\n${YELLOW}$M_PRESS_KEY${NC}"
+        read -n 1 -s -r
+    fi
+}
+
 tui_input() {
     local p="$1"; local d="$2"; local v="$3"; local pass="$4"
     
@@ -393,10 +415,15 @@ tui_menu() {
     local t="$1"; shift; local opts=("$@"); local sel=0; local tot=${#opts[@]}
     
     if command -v whiptail >/dev/null 2>&1; then
+        # 修复: 清理标题中的颜色代码，防止 whiptail 显示乱码
+        local clean_title=$(echo "$t" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
+        
         local args=()
         for ((i=0; i<tot; i++)); do
-            # 移除颜色代码 (兼容 literal \033 和 Escape char)
+            # 移除颜色代码
             local clean_opt=$(echo "${opts[i]}" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
+            # 修复: 移除可能存在的 "1. " 序号前缀，防止与 whiptail 的 tag 重复显示 (如 "1 1. 选项")
+            clean_opt=$(echo "$clean_opt" | sed 's/^[0-9]*[.]\s*//')
             args+=("$((i+1))" "${clean_opt}")
         done
         
@@ -407,15 +434,11 @@ tui_menu() {
         local list_h=$((h - 8))
         if [ $list_h -lt 5 ]; then list_h=5; fi
         
-        # 优化: 如果传入的标题 $t 包含换行符，则将其视为 (Title, Text)
-        # 但 whiptail 只能接受一个 --title 和一个 text
-        # 我们使用全局变量 MENU_TITLE 作为 Box Title, $t 作为内部文本
-        # 如果 MENU_TITLE 未定义，则使用默认 M_TITLE
-        
         local box_title="${MENU_TITLE:-$M_TITLE}"
         
+        # 使用 clean_title
         local choice
-        choice=$(whiptail --title "$box_title" --menu "$t" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
+        choice=$(whiptail --title "$box_title" --menu "$clean_title" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
         
         if [ $? -eq 0 ]; then
             return $((choice-1))
@@ -430,6 +453,9 @@ tui_menu() {
         for ((i=0; i<tot; i++)); do
             # 兼容处理: 移除字符串中可能存在的非 ASCII 控制字符
             local display_opt=$(echo "${opts[i]}" | sed 's/\x1b\[[0-9;]*m//g')
+            # 同样移除手动添加的序号，统一由代码生成
+            display_opt=$(echo "$display_opt" | sed 's/^[0-9]*[.]\s*//')
+            
             local idx=$((i+1))
             if [ $i -eq $sel ]; then echo -e "${GREEN} -> $idx. ${display_opt} ${NC}"; else echo -e "    $idx. ${display_opt} "; fi
         done
@@ -1790,16 +1816,18 @@ check_dep_status_core() {
     
     # 仅在需要显示时输出
     if [ "$1" == "print" ]; then
-        tui_header
-        echo -e "${CYAN}依赖安装状态:${NC}"
-        echo "----------------------------------------"
-        for line in "${info_arr[@]}"; do echo -e "$line"; done
-        echo "----------------------------------------"
+        local msg_str="依赖安装状态:\n----------------------------------------\n"
+        for line in "${info_arr[@]}"; do msg_str+="$line\n"; done
+        msg_str+="----------------------------------------\n"
+        
         if [ $missing -eq 0 ]; then
-            echo -e "${GREEN}完美！所有依赖已就绪。${NC}"
+            msg_str+="${GREEN}完美！所有依赖已就绪。${NC}"
         else
-            echo -e "${YELLOW}发现 $missing 个缺失依赖。${NC}"
+            msg_str+="${YELLOW}发现 $missing 个缺失依赖。${NC}"
         fi
+        
+        MENU_TITLE="依赖管理中心" \
+        tui_msgbox "$msg_str"
     fi
     
     if [ $missing -eq 0 ]; then return 0; else return 1; fi
@@ -1877,21 +1905,29 @@ install_all_deps_smart() {
     if eval "$cmd_install"; then
         # 二次检查: 确保关键依赖确实装上了
         if check_dep_status_core "silent"; then
-             echo -e "${GREEN}所有依赖安装成功！${NC}"
+             MENU_TITLE="依赖安装" \
+             tui_msgbox "${GREEN}所有依赖安装成功！${NC}"
         else
-             echo -e "${YELLOW}部分依赖似乎仍未安装成功，尝试执行修复...${NC}"
              # 针对 lib32gcc1/s1 的最后尝试
              if [ -f /etc/debian_version ]; then
                  echo -e "${CYAN}尝试强制安装 lib32gcc 变体...${NC}"
                  apt-get install -y lib32gcc-s1 lib32gcc1 2>/dev/null || true
              fi
+             
+             if check_dep_status_core "silent"; then
+                 MENU_TITLE="依赖安装" \
+                 tui_msgbox "${GREEN}修复成功！所有依赖已就绪。${NC}"
+             else
+                 MENU_TITLE="依赖安装" \
+                 tui_msgbox "${YELLOW}部分依赖似乎仍未安装成功。\n建议尝试 [换源] 功能修复网络问题后重试。${NC}"
+             fi
         fi
     else
-        echo -e "${RED}安装过程中出现错误。${NC}"
-        echo -e "${YELLOW}建议尝试 [换源] 功能修复网络问题。${NC}"
+        MENU_TITLE="依赖安装" \
+        tui_msgbox "${RED}安装过程中出现错误。\n建议尝试 [换源] 功能修复网络问题。${NC}"
     fi
     
-    read -n 1 -s -r
+    # read -n 1 -s -r # tui_msgbox 已经包含了等待
 }
 
 # 换源功能
@@ -1923,11 +1959,11 @@ change_repo_source() {
     
     MENU_TITLE="Linux 智能换源助手" \
     tui_menu "检测到系统: ${GREEN}${dist} ${ver} (${code})${NC}\n请选择要更换的国内源:" \
-        "1. 阿里云 (Aliyun) - 推荐" \
-        "2. 清华大学 (TUNA)" \
-        "3. 腾讯云 (Tencent)" \
-        "4. 还原官方源 (Restore)" \
-        "5. 返回"
+        "阿里云 (Aliyun) - 推荐" \
+        "清华大学 (TUNA)" \
+        "腾讯云 (Tencent)" \
+        "还原官方源 (Restore)" \
+        "返回"
     
     local choice
     case $? in
@@ -1956,7 +1992,7 @@ change_repo_source() {
     echo -e "${YELLOW}正在配置源...${NC}"
     
     if [ "$domain" == "restore" ]; then
-        if [ -f "${file}.bak" ]; then cp "${file}.bak" "$file"; echo -e "${GREEN}已还原。${NC}"; else echo -e "${RED}无备份文件。${NC}"; fi
+        if [ -f "${file}.bak" ]; then cp "${file}.bak" "$file"; MENU_TITLE="换源结果" tui_msgbox "${GREEN}已还原。${NC}"; else MENU_TITLE="换源结果" tui_msgbox "${RED}无备份文件。${NC}"; fi
     else
         if [ "$dist" == "debian" ]; then
             # Debian 智能生成
@@ -1979,7 +2015,7 @@ change_repo_source() {
             local repo_ver=$(echo "$ver" | cut -d. -f1)
             curl -o /etc/yum.repos.d/CentOS-Base.repo "http://${domain}/repo/Centos-${repo_ver}.repo"
         fi
-        echo -e "${GREEN}源文件已更新。${NC}"
+        MENU_TITLE="换源结果" tui_msgbox "${GREEN}源文件已更新。${NC}\n正在刷新缓存..."
     fi
     
     echo -e "${CYAN}正在刷新缓存...${NC}"
@@ -1989,15 +2025,15 @@ change_repo_source() {
         apt-get update
     fi
     
-    echo -e "${GREEN}操作完成。${NC}"; read -n 1 -s -r
+    MENU_TITLE="换源结果" tui_msgbox "${GREEN}操作完成。${NC}"
 }
 
 dep_manager_menu() {
     while true; do
         tui_menu "依赖管理中心" "查看依赖安装状态" "一键安装/修复所有依赖" "更换系统软件源 (修复下载慢)" "返回"
         case $? in
-            0) check_dep_status_core "print"; read -n 1 -s -r ;;
-            1) install_all_deps_smart ;;
+            0) check_dep_status_core "print" ;; # check_dep_status_core 内部已使用 tui_msgbox
+            1) install_all_deps_smart ;; # 内部已使用 tui_msgbox
             2) change_repo_source ;;
             *) return ;;
         esac
