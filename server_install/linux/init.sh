@@ -1778,10 +1778,27 @@ check_dep_status_core() {
     
     # 针对 Debian/Ubuntu 的 lib32gcc 兼容性处理
     local lib32gcc_name="lib32gcc-s1"
-    if [ -f /etc/debian_version ]; then
-        # 尝试检测旧版 lib32gcc1
-        if apt-cache show lib32gcc1 >/dev/null 2>&1; then
-             lib32gcc_name="lib32gcc1"
+    
+    if [ -f /etc/os-release ]; then
+        # 避免污染全局变量，在一个子 shell 或者使用 local 变量读取
+        # 但这里是函数内，直接读取也行，但要注意变量名冲突。
+        # 上下文已经有 . /etc/os-release 的逻辑吗？
+        # check_dep_status_core 是独立函数。
+        local ID=""
+        local VERSION_ID=""
+        # 使用 grep 提取，避免 source 覆盖可能的全局变量
+        ID=$(grep "^ID=" /etc/os-release | cut -d= -f2 | tr -d '"')
+        VERSION_ID=$(grep "^VERSION_ID=" /etc/os-release | cut -d= -f2 | tr -d '"')
+        
+        if [[ "$ID" == "debian" ]]; then
+            local major_ver=$(echo "$VERSION_ID" | cut -d. -f1)
+            if [ -n "$major_ver" ] && [ "$major_ver" -le 10 ]; then
+                lib32gcc_name="lib32gcc1"
+            fi
+        elif [[ "$ID" == "ubuntu" ]]; then
+             case "$VERSION_ID" in
+                "16.04"|"18.04"|"20.04") lib32gcc_name="lib32gcc1" ;;
+            esac
         fi
     fi
     
