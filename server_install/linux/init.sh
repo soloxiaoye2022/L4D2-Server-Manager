@@ -133,7 +133,7 @@ check_deps() {
             if sudo bash -c "$cmd"; then echo -e "$M_INSTALL_OK"; return 0; fi
         fi
         if command -v pkg >/dev/null; then pkg install -y "${miss[@]}"; return; fi
-        echo -e "$M_MANUAL_INSTALL sudo $cmd"; read -n 1 -s -r; return
+        MENU_TITLE="依赖缺失" tui_msgbox "$M_MANUAL_INSTALL sudo $cmd"; return
     fi
     
     if [ -f /etc/debian_version ]; then dpkg --add-architecture i386 >/dev/null 2>&1; fi
@@ -371,8 +371,9 @@ tui_msgbox() {
     if command -v whiptail >/dev/null 2>&1; then
         local h=$(tput lines)
         local w=$(tput cols)
-        if [ $h -gt 35 ]; then h=35; fi
-        if [ $w -gt 160 ]; then w=160; fi
+        # 调整最大尺寸，使界面更紧凑居中
+        if [ $h -gt 20 ]; then h=20; fi
+        if [ $w -gt 70 ]; then w=70; fi
         
         # 移除颜色代码
         local clean_t=$(echo "$t" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
@@ -429,9 +430,10 @@ tui_menu() {
         
         local h=$(tput lines)
         local w=$(tput cols)
-        if [ $h -gt 35 ]; then h=35; fi
-        if [ $w -gt 160 ]; then w=160; fi
-        local list_h=$((h - 8))
+        # 优化: 限制最大宽度为 70，确保菜单在屏幕中间显示更紧凑（视觉居中）
+        if [ $h -gt 30 ]; then h=30; fi
+        if [ $w -gt 70 ]; then w=70; fi
+        local list_h=$((h - 10))
         if [ $list_h -lt 5 ]; then list_h=5; fi
         
         local box_title="${MENU_TITLE:-$M_TITLE}"
@@ -516,11 +518,11 @@ install_smart() {
     
     if ! mkdir -p "$target_dir" 2>/dev/null; then
         if [ "$target_dir" == "$SYSTEM_INSTALL_DIR" ]; then
-             echo -e "$M_SYS_DIR_RO"
+             MENU_TITLE="$M_INIT_INSTALL" tui_msgbox "$M_SYS_DIR_RO"
              target_dir="$USER_INSTALL_DIR"; link_path="$USER_BIN"
-             mkdir -p "$target_dir" || { echo -e "$M_INSTALL_FAIL"; exit 1; }
+             mkdir -p "$target_dir" || { MENU_TITLE="$M_INIT_INSTALL" tui_msgbox "$M_INSTALL_FAIL"; exit 1; }
         else
-             echo -e "$M_NO_PERM $target_dir"; exit 1;
+             MENU_TITLE="$M_INIT_INSTALL" tui_msgbox "$M_NO_PERM $target_dir"; exit 1;
         fi
     fi
 
@@ -531,7 +533,7 @@ install_smart() {
         cp "$0" "$target_dir/l4m"
     else
         # 使用新下载器自我下载
-        download_file "soloxiaoye2022/server_install/main/server_install/linux/init.sh" "$target_dir/l4m" "L4M Script" || { echo -e "$M_DL_FAIL"; exit 1; }
+        download_file "soloxiaoye2022/server_install/main/server_install/linux/init.sh" "$target_dir/l4m" "L4M Script" || { MENU_TITLE="$M_INIT_INSTALL" tui_msgbox "$M_DL_FAIL"; exit 1; }
     fi
     chmod +x "$target_dir/l4m"
     
@@ -539,7 +541,7 @@ install_smart() {
     if ln -sf "$target_dir/l4m" "$link_path" 2>/dev/null; then
         echo -e "$M_LINK_CREATED $link_path"
     else
-        echo -e "$M_LINK_FAIL l4m='$target_dir/l4m'"
+        MENU_TITLE="$M_INIT_INSTALL" tui_msgbox "$M_LINK_FAIL l4m='$target_dir/l4m'"
     fi
     
     if [ "$MANAGER_ROOT" != "$target_dir" ]; then
@@ -550,11 +552,10 @@ install_smart() {
     touch "$target_dir/servers.dat"
     
     if [[ "$link_path" == "$USER_BIN" ]] && [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
-        echo -e "$M_ADD_PATH"
+        MENU_TITLE="$M_INIT_INSTALL" tui_msgbox "$M_ADD_PATH"
     fi
 
-    echo -e "$M_INSTALL_DONE"
-    sleep 2
+    MENU_TITLE="$M_INIT_INSTALL" tui_msgbox "$M_INSTALL_DONE"
     exec "$target_dir/l4m"
 }
 
@@ -569,23 +570,14 @@ self_update() {
     if download_file "soloxiaoye2022/server_install/main/server_install/linux/init.sh" "$temp" "Update Script"; then
         if grep -q "main()" "$temp"; then
             mv "$temp" "$FINAL_ROOT/l4m"; chmod +x "$FINAL_ROOT/l4m"
-            echo -e "$M_UPDATE_SUCCESS"; sleep 1; exec "$FINAL_ROOT/l4m"
+            MENU_TITLE="$M_UPDATE" tui_msgbox "$M_UPDATE_SUCCESS"; exec "$FINAL_ROOT/l4m"
         else
-            echo -e "$M_VERIFY_FAIL"
-            echo -e "${YELLOW}Debug Info:${NC}"
-            echo -e "File size: $(wc -c < "$temp" 2>/dev/null) bytes"
-            echo -e "Head content (first 10 lines):"
-            echo "----------------------------------------"
-            head -n 10 "$temp"
-            echo "----------------------------------------"
-            echo -e "${YELLOW}Wait 10s to read debug info...${NC}"
-            sleep 10
+            MENU_TITLE="$M_UPDATE" tui_msgbox "$M_VERIFY_FAIL\n\n${YELLOW}Debug Info:${NC}\nFile size: $(wc -c < "$temp" 2>/dev/null) bytes\n$(head -n 10 "$temp")"
             rm "$temp"
         fi
     else
-        echo -e "$M_CONN_FAIL"
+        MENU_TITLE="$M_UPDATE" tui_msgbox "$M_CONN_FAIL"
     fi
-    read -n 1 -s -r
 }
 
 install_steamcmd() {
@@ -616,7 +608,7 @@ deploy_wizard() {
     tui_header; echo -e "${GREEN}$M_DEPLOY${NC}"
     local name=""; while [ -z "$name" ]; do
         tui_input "$M_SRV_NAME" "l4d2_srv_1" "name"
-        if grep -q "^${name}|" "$DATA_FILE"; then echo -e "$M_NAME_EXIST"; name=""; fi
+        if grep -q "^${name}|" "$DATA_FILE"; then MENU_TITLE="$M_DEPLOY" tui_msgbox "$M_NAME_EXIST"; name=""; fi
     done
     
     local def_path="$HOME/L4D2_Servers/${name}"
@@ -624,7 +616,7 @@ deploy_wizard() {
     local path=""; while [ -z "$path" ]; do
         tui_input "$M_INSTALL_DIR" "$def_path" "path"
         path="${path/#\~/$HOME}"
-        if [ -d "$path" ] && [ "$(ls -A "$path")" ]; then echo -e "$M_DIR_NOT_EMPTY"; path=""; fi
+        if [ -d "$path" ] && [ "$(ls -A "$path")" ]; then MENU_TITLE="$M_DEPLOY" tui_msgbox "$M_DIR_NOT_EMPTY"; path=""; fi
     done
     
     tui_header; echo "$M_LOGIN_ANON"; echo "$M_LOGIN_ACC"
@@ -676,11 +668,9 @@ deploy_wizard() {
     
     # 2. Deploy from Cache
     if [ ! -f "${SERVER_CACHE_DIR}/srcds_run" ]; then
-        echo -e "\n${RED}======================================${NC}"
-        echo -e "${RED}        $M_FAILED $M_DEPLOY_FAIL             ${NC}"
-        echo -e "${RED}======================================${NC}"
-        echo -e "$M_NO_SRCDS"
-        read -n 1 -s -r; return
+        MENU_TITLE="$M_DEPLOY_FAIL" \
+        tui_msgbox "${RED}        $M_FAILED $M_DEPLOY_FAIL             ${NC}\n\n$M_NO_SRCDS"
+        return
     fi
     
     echo -e "$M_COPY_CACHE"
@@ -703,11 +693,9 @@ deploy_wizard() {
     chmod +x "${path}/run_guard.sh"
     
     echo "${name}|${path}|STOPPED|27015|false" >> "$DATA_FILE"
-    echo -e "\n${GREEN}======================================${NC}"
-    echo -e "${GREEN}        $M_SUCCESS            ${NC}"
-    echo -e "${GREEN}======================================${NC}"
-    echo -e "$M_SRV_READY ${CYAN}${path}${NC}"
-    read -n 1 -s -r
+    
+    MENU_TITLE="$M_SUCCESS" \
+    tui_msgbox "${GREEN}        $M_SUCCESS            ${NC}\n\n$M_SRV_READY ${CYAN}${path}${NC}"
 }
 
 #=============================================================================
@@ -789,17 +777,15 @@ download_packages() {
         done
         
         if [ -z "$content" ]; then
-             echo -e "${RED}无法获取插件列表 (所有镜像源均失效)。${NC}"; read -n 1 -s -r; return
+             MENU_TITLE="$M_DOWNLOAD_PACKAGES" tui_msgbox "${RED}无法获取插件列表 (所有镜像源均失效)。${NC}"; return
         fi
         
         # 提取文件名 (兼容非 GNU grep)
         local packages=$(echo "$content" | grep -o '"name": "[^"]*"' | cut -d'"' -f4 | grep -E '\.(7z|zip|tar\.gz|tar\.bz2)$' | grep -i "整合包")
              
         if [ -z "$packages" ]; then
-            echo -e "${RED}未找到任何整合包。${NC}"
-            echo -e "${GREY}API 响应预览:${NC}"
-            echo "$content" | head -n 20
-            read -n 1 -s -r; return
+            MENU_TITLE="$M_DOWNLOAD_PACKAGES" tui_msgbox "${RED}未找到任何整合包。${NC}\n${GREY}API 响应预览:${NC}\n$(echo "$content" | head -n 20)"
+            return
         fi
         
         while IFS= read -r pkg; do
@@ -809,10 +795,9 @@ download_packages() {
     elif [ "$choice" == "2" ]; then
         source_mode="local"
         local target_path=""
-        echo -e "${YELLOW}请输入本地仓库的绝对路径:${NC}"
-        read -e target_path
+        tui_input "${YELLOW}请输入本地仓库的绝对路径:${NC}" "" "target_path"
         
-        if [ ! -d "$target_path" ]; then echo -e "${RED}目录不存在。${NC}"; read -n 1 -s -r; return; fi
+        if [ ! -d "$target_path" ]; then MENU_TITLE="$M_DOWNLOAD_PACKAGES" tui_msgbox "${RED}目录不存在。${NC}"; return; fi
         source_path="$target_path"
         
         echo -e "${CYAN}正在扫描本地仓库...${NC}"
@@ -820,7 +805,7 @@ download_packages() {
             pkg_array+=("$(basename "$file")")
         done < <(find "$target_path" -maxdepth 1 \( -name "*.7z" -o -name "*.zip" -o -name "*.tar.gz" \) -print0)
         
-        if [ ${#pkg_array[@]} -eq 0 ]; then echo -e "${RED}未找到压缩包。${NC}"; read -n 1 -s -r; return; fi
+        if [ ${#pkg_array[@]} -eq 0 ]; then MENU_TITLE="$M_DOWNLOAD_PACKAGES" tui_msgbox "${RED}未找到压缩包。${NC}"; return; fi
     else
         return
     fi
@@ -983,14 +968,14 @@ download_packages() {
         fi
     done
     
-    echo -e "\n${GREEN}处理完成，共成功 ${c} 个包${NC}"; read -n 1 -s -r
+    echo -e "\n${GREEN}处理完成，共成功 ${c} 个包${NC}"; MENU_TITLE="$M_DOWNLOAD_PACKAGES" tui_msgbox "${GREEN}处理完成，共成功 ${c} 个包${NC}"
 }
 
 manage_plugins() {
     local t="$1/left4dead2"
     local rec_dir="$1/.plugin_records"
     
-    if [ ! -d "$JS_MODS_DIR" ]; then echo -e "$M_REPO_NOT_FOUND $JS_MODS_DIR"; read -n 1 -s -r; return; fi
+    if [ ! -d "$JS_MODS_DIR" ]; then MENU_TITLE="$M_PLUG_MANAGE" tui_msgbox "$M_REPO_NOT_FOUND $JS_MODS_DIR"; return; fi
     mkdir -p "$rec_dir"
     
     # 1. Gather all available plugins
@@ -999,7 +984,7 @@ manage_plugins() {
         available_plugins+=("$(basename "$dir")")
     done < <(find "$JS_MODS_DIR" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
     
-    if [ ${#available_plugins[@]} -eq 0 ]; then echo "$M_REPO_EMPTY"; read -n 1 -s -r; return; fi
+    if [ ${#available_plugins[@]} -eq 0 ]; then MENU_TITLE="$M_PLUG_MANAGE" tui_msgbox "$M_REPO_EMPTY"; return; fi
     
     # 2. Check installed status
     local installed_status=() # 1 for installed, 0 for not
@@ -1146,7 +1131,7 @@ manage_plugins() {
         fi
     done
     
-    echo -e "$M_DONE"; read -n 1 -s -r
+    MENU_TITLE="$M_PLUG_MANAGE" tui_msgbox "$M_DONE"
 }
 
 
@@ -1155,9 +1140,8 @@ plugins_menu() {
     local p="$1"
     # 修复：只检查基础目录，不强制要求 left4dead2 子目录存在 (可能尚未首次运行生成)
     if [ ! -d "$p" ]; then 
-        echo -e "${RED}目录错: 找不到路径 '$p'${NC}"
-        echo -e "${YELLOW}可能原因: 实例路径被移动或包含特殊字符。${NC}"
-        read -n 1 -s -r; return
+        MENU_TITLE="$M_OPT_PLUGINS" tui_msgbox "${RED}目录错: 找不到路径 '$p'${NC}\n\n${YELLOW}可能原因: 实例路径被移动或包含特殊字符。${NC}"
+        return
     fi
     
     # 确保 left4dead2 目录存在
@@ -1179,7 +1163,7 @@ set_plugin_repo() {
     local pkg_dir="${FINAL_ROOT}/downloaded_packages"
     
     MENU_TITLE="$M_PLUG_REPO" \
-    tui_menu "请选择操作:" \
+    tui_menu "$M_CUR_REPO $JS_MODS_DIR\n\n请选择操作:" \
         "1. 选择已下载的插件整合包" \
         "2. 手动输入插件库目录" \
         "3. 返回"
@@ -1200,7 +1184,7 @@ set_plugin_repo() {
         1)
             local pkg_list=()
             for dir in "$pkg_dir"/*; do if [ -d "$dir" ]; then pkg_list+=("$(basename "$dir")"); fi; done
-            if [ ${#pkg_list[@]} -eq 0 ]; then echo -e "${YELLOW}没有已下载的插件整合包${NC}"; read -n 1 -s -r; return; fi
+            if [ ${#pkg_list[@]} -eq 0 ]; then MENU_TITLE="$M_PLUG_REPO" tui_msgbox "${YELLOW}没有已下载的插件整合包${NC}"; return; fi
             
             local cur=0
             local tot=${#pkg_list[@]}
@@ -1223,9 +1207,9 @@ set_plugin_repo() {
                 local selected_dir="$pkg_dir/${pkg_list[$cur]}/JS-MODS"
                 if [ -d "$selected_dir" ]; then
                     JS_MODS_DIR="$selected_dir"; echo "$selected_dir" > "$PLUGIN_CONFIG"
-                    echo -e "${GREEN}已选择插件库: $selected_dir${NC}"; read -n 1 -s -r
+                    MENU_TITLE="$M_PLUG_REPO" tui_msgbox "${GREEN}已选择插件库: $selected_dir${NC}"
                 else
-                    echo -e "${RED}整合包结构不正确，缺少JS-MODS目录${NC}"; read -n 1 -s -r
+                    MENU_TITLE="$M_PLUG_REPO" tui_msgbox "${RED}整合包结构不正确，缺少JS-MODS目录${NC}"
                 fi
             fi
             ;;
@@ -1234,7 +1218,7 @@ set_plugin_repo() {
             tui_input "$M_NEW_REPO_PROMPT" "$JS_MODS_DIR" "new"
             if [ -n "$new" ]; then
                 JS_MODS_DIR="$new"; echo "$new" > "$PLUGIN_CONFIG"
-                mkdir -p "$new"; echo -e "$M_SAVED"
+                mkdir -p "$new"; MENU_TITLE="$M_PLUG_REPO" tui_msgbox "$M_SAVED"
             fi
             sleep 1
             ;;
@@ -1253,20 +1237,20 @@ inst_plat() {
         local m=$(curl -s "https://www.sourcemm.net/downloads.php?branch=stable" | grep -Eo "https://[^']+linux.tar.gz" | head -1)
         local s=$(curl -s "http://www.sourcemod.net/downloads.php?branch=stable" | grep -Eo "https://[^']+linux.tar.gz" | head -1)
         
-        if [ -z "$m" ] || [ -z "$s" ]; then echo -e "$M_GET_LINK_FAIL"; read -n 1 -s -r; return; fi
+        if [ -z "$m" ] || [ -z "$s" ]; then MENU_TITLE="$M_PLUG_PLAT" tui_msgbox "$M_GET_LINK_FAIL"; return; fi
         
         echo -e "MetaMod: ${GREY}$(basename "$m")${NC}"
         echo -e "SourceMod: ${GREY}$(basename "$s")${NC}"
         
         if ! wget -O mm.tar.gz "$m" || ! wget -O sm.tar.gz "$s"; then
-             echo -e "$M_DL_FAIL"; rm -f mm.tar.gz sm.tar.gz; read -n 1 -s -r; return
+             MENU_TITLE="$M_PLUG_PLAT" tui_msgbox "$M_DL_FAIL"; rm -f mm.tar.gz sm.tar.gz; return
         fi
         
         tar -zxf mm.tar.gz && tar -zxf sm.tar.gz
         rm mm.tar.gz sm.tar.gz
     fi
     if [ -f "$d/addons/metamod.vdf" ]; then sed -i '/"file"/c\\t"file"\t"..\/left4dead2\/addons\/metamod\/bin\/server"' "$d/addons/metamod.vdf"; fi
-    echo -e "${GREEN}$M_SUCCESS $M_DONE${NC}"; read -n 1 -s -r
+    MENU_TITLE="$M_PLUG_PLAT" tui_msgbox "${GREEN}$M_SUCCESS $M_DONE${NC}"
 }
 
 #=============================================================================
@@ -1424,7 +1408,10 @@ manage_menu() {
         fi
     done < "$DATA_FILE"
     
-    if [ ${#srvs[@]} -eq 0 ]; then echo -e "$M_NO_INSTANCE"; read -n 1 -s -r; return; fi
+    if [ ${#srvs[@]} -eq 0 ]; then 
+        MENU_TITLE="实例管理" tui_msgbox "$M_NO_INSTANCE"; 
+        return; 
+    fi
     opts+=("$M_RETURN")
     tui_menu "$M_SELECT_INSTANCE" "${opts[@]}"; local c=$?
     if [ $c -eq 255 ]; then return; fi
@@ -1437,8 +1424,8 @@ control_panel() {
     local line=$(awk -F'|' -v t="$n" '$1 == t {print $0; exit}' "$DATA_FILE")
     
     if [ -z "$line" ]; then
-        echo -e "${RED}Error: 无法在数据文件中找到实例 '$n'${NC}"
-        read -n 1 -s -r; return
+        MENU_TITLE="实例错误" tui_msgbox "${RED}Error: 无法在数据文件中找到实例 '$n'${NC}"
+        return
     fi
     
     local p=$(echo "$line" | cut -d'|' -f2)
@@ -1553,7 +1540,7 @@ start_srv() {
     local real_port=$(grep -oP "(?<=-port )\d+" "$p/run_guard.sh" | head -1)
     if [ -z "$real_port" ]; then real_port=$port; fi
     
-    if check_port "$real_port"; then echo -e "$M_PORT_OCCUPIED"; read -n 1 -s -r; return; fi
+    if check_port "$real_port"; then MENU_TITLE="$M_OPT_START" tui_msgbox "$M_PORT_OCCUPIED"; return; fi
     
     cd "$p" || return
     tmux new-session -d -s "l4d2_$n" "./run_guard.sh"
@@ -1569,14 +1556,14 @@ stop_srv() {
 
 attach_con() {
     local n="$1"
-    if [ "$(get_status "$n")" == "STOPPED" ]; then echo -e "$M_NOT_RUNNING"; sleep 1; return; fi
-    echo -e "$M_DETACH_HINT"; read -n 1 -s -r
+    if [ "$(get_status "$n")" == "STOPPED" ]; then MENU_TITLE="$M_OPT_CONSOLE" tui_msgbox "$M_NOT_RUNNING"; return; fi
+    MENU_TITLE="$M_OPT_CONSOLE" tui_msgbox "$M_DETACH_HINT"
     tmux attach-session -t "l4d2_$n"
 }
 
 view_log() {
     local f="$1/left4dead2/console.log"
-    if [ -f "$f" ]; then tail -f "$f"; else echo -e "$M_NO_LOG"; read -n 1 -s -r; fi
+    if [ -f "$f" ]; then tail -f "$f"; else MENU_TITLE="$M_OPT_LOGS" tui_msgbox "$M_NO_LOG"; fi
 }
 
 edit_args() {
@@ -1653,8 +1640,12 @@ backup_srv() {
     for t in "${targets[@]}"; do if [ -e "$t" ]; then final+=("$t"); fi; done
     tar -czf "${BACKUP_DIR}/$f" --exclude="left4dead2/addons/sourcemod/logs" --exclude="*.log" "${final[@]}"
     rm -f "$list"
-    if [ $? -eq 0 ]; then echo -e "$M_BACKUP_OK backups/$f ($(du -h "${BACKUP_DIR}/$f" | cut -f1))${NC}"; else echo -e "$M_BACKUP_FAIL"; fi
-    read -n 1 -s -r
+    
+    if [ $? -eq 0 ]; then 
+        MENU_TITLE="$M_OPT_BACKUP" tui_msgbox "$M_BACKUP_OK backups/$f ($(du -h "${BACKUP_DIR}/$f" | cut -f1))"
+    else 
+        MENU_TITLE="$M_OPT_BACKUP" tui_msgbox "$M_BACKUP_FAIL"
+    fi
 }
 
 delete_srv() {
@@ -1667,7 +1658,7 @@ delete_srv() {
         "1. 确认删除 (Yes)" \
         "2. 取消 (No)"
         
-    if [ $? -ne 0 ]; then echo -e "$M_DELETE_CANCEL"; sleep 1; return 1; fi
+    if [ $? -ne 0 ]; then MENU_TITLE="删除实例" tui_msgbox "$M_DELETE_CANCEL"; return 1; fi
     
     if [ "$(get_status "$n")" == "RUNNING" ]; then
         stop_srv "$n"
@@ -1679,8 +1670,7 @@ delete_srv() {
     if [ -d "$p" ]; then rm -rf "$p"; fi
     rm -f "${TRAFFIC_DIR}/${n}_"*.csv
     
-    printf "$M_DELETE_OK" "$n"
-    read -n 1 -s -r
+    MENU_TITLE="删除实例" tui_msgbox "$(printf "$M_DELETE_OK" "$n")"
     return 0
 }
 
@@ -1721,7 +1711,7 @@ traffic_daemon() {
 
 view_traffic() {
     local n="$1"; local port="$2"
-    if [ "$EUID" -ne 0 ]; then echo -e "$M_NEED_ROOT"; read -n 1 -s -r; return; fi
+    if [ "$EUID" -ne 0 ]; then MENU_TITLE="$M_OPT_TRAFFIC" tui_msgbox "$M_NEED_ROOT"; return; fi
     while true; do
         tui_header; echo -e "$M_TRAFFIC_STATS $n ($port)\n----------------------------------------"
         local r1=$(iptables -nvxL L4M_STATS | awk -v p="dpt:$port" '$0 ~ p {sum+=$2} END {print sum+0}')
@@ -1853,9 +1843,8 @@ check_dep_status_core() {
 # 智能安装所有依赖
 install_all_deps_smart() {
     if [ "$EUID" -ne 0 ]; then
-        echo -e "${RED}安装依赖需要 Root 权限。${NC}"
-        echo -e "${YELLOW}请尝试: sudo l4m${NC}"
-        read -n 1 -s -r; return
+        MENU_TITLE="依赖安装" tui_msgbox "${RED}安装依赖需要 Root 权限。${NC}\n${YELLOW}请尝试: sudo l4m${NC}"
+        return
     fi
     
     echo -e "${CYAN}正在初始化安装进程...${NC}"
@@ -1912,7 +1901,7 @@ install_all_deps_smart() {
         cmd_update="yum makecache"
         cmd_install="yum install -y $pkg_list"
     else
-        echo -e "${RED}未知的发行版，无法自动安装。${NC}"; read -n 1 -s -r; return
+        MENU_TITLE="依赖安装" tui_msgbox "${RED}未知的发行版，无法自动安装。${NC}"; return
     fi
     
     echo -e "${YELLOW}Step 1: 更新软件源索引...${NC}"
@@ -1949,7 +1938,7 @@ install_all_deps_smart() {
 
 # 换源功能
 change_repo_source() {
-    if [ "$EUID" -ne 0 ]; then echo -e "${RED}需 Root 权限${NC}"; read -n 1 -s -r; return; fi
+    if [ "$EUID" -ne 0 ]; then MENU_TITLE="智能换源" tui_msgbox "${RED}需 Root 权限${NC}"; return; fi
     
     tui_header
     echo -e "${CYAN}Linux 智能换源助手${NC}"
@@ -1970,8 +1959,8 @@ change_repo_source() {
     echo -e "检测到系统: ${GREEN}${dist} ${ver} (${code})${NC}"
     
     if [[ "$dist" != "debian" && "$dist" != "ubuntu" && "$dist" != "centos" ]]; then
-        echo -e "${RED}当前仅支持 Debian / Ubuntu / CentOS 自动换源。${NC}"
-        read -n 1 -s -r; return
+        MENU_TITLE="智能换源" tui_msgbox "${RED}当前仅支持 Debian / Ubuntu / CentOS 自动换源。${NC}"
+        return
     fi
     
     MENU_TITLE="Linux 智能换源助手" \
