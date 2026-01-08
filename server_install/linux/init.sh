@@ -435,13 +435,33 @@ tui_menu() {
                 local target=$((k-1))
                 if [ $target -lt $tot ]; then tput cnorm; return $target; fi
                 ;;
+            "0")
+                if [ $tot -ge 10 ]; then tput cnorm; return 9; fi
+                ;;
+            "q"|"Q")
+                 # Return 255 to indicate exit/back
+                 tput cnorm; return 255
+                 ;;
             "A") ((sel--)); if [ $sel -lt 0 ]; then sel=$((tot-1)); fi ;;
             "B") ((sel++)); if [ $sel -ge $tot ]; then sel=0; fi ;;
             $'\x1b') 
                 read -rsn2 -t 0.1 r 2>/dev/null
-                if [[ "$r" == "[A" ]]; then ((sel--)); if [ $sel -lt 0 ]; then sel=$((tot-1)); fi
-                elif [[ "$r" == "[B" ]]; then ((sel++)); if [ $sel -ge $tot ]; then sel=0; fi
-                elif [[ -z "$r" ]]; then tput cnorm; return 255; fi # ESC 返回
+                case "$r" in
+                    "[A") ((sel--)); if [ $sel -lt 0 ]; then sel=$((tot-1)); fi ;;
+                    "[B") ((sel++)); if [ $sel -ge $tot ]; then sel=0; fi ;;
+                    # Handle Numpad in Application Mode (SS3 sequences)
+                    "Op") if [ $tot -ge 10 ]; then tput cnorm; return 9; fi ;; # 0
+                    "Oq") if [ $tot -ge 1 ]; then tput cnorm; return 0; fi ;; # 1
+                    "Or") if [ $tot -ge 2 ]; then tput cnorm; return 1; fi ;; # 2
+                    "Os") if [ $tot -ge 3 ]; then tput cnorm; return 2; fi ;; # 3
+                    "Ot") if [ $tot -ge 4 ]; then tput cnorm; return 3; fi ;; # 4
+                    "Ou") if [ $tot -ge 5 ]; then tput cnorm; return 4; fi ;; # 5
+                    "Ov") if [ $tot -ge 6 ]; then tput cnorm; return 5; fi ;; # 6
+                    "Ow") if [ $tot -ge 7 ]; then tput cnorm; return 6; fi ;; # 7
+                    "Ox") if [ $tot -ge 8 ]; then tput cnorm; return 7; fi ;; # 8
+                    "Oy") if [ $tot -ge 9 ]; then tput cnorm; return 8; fi ;; # 9
+                    "") tput cnorm; return 255 ;; # ESC key
+                esac
                 ;;
         esac
     done
@@ -1156,11 +1176,29 @@ set_plugin_repo() {
                     elif [[ "$k" =~ [1-9] ]]; then
                         local target=$((k-1))
                         if [ $target -lt $tot ]; then cur=$target; break; fi
+                    elif [[ "$k" == "0" ]]; then
+                        if [ $tot -ge 10 ]; then cur=9; break; fi
+                    elif [[ "$k" == "q" || "$k" == "Q" ]]; then
+                        # Return to parent/exit (return false to loop)
+                        tput cnorm; return
                     elif [[ "$k" == $'\x1b' ]]; then
                          read -rsn2 -t 0.1 r
-                         if [[ "$r" == "[A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
-                         elif [[ "$r" == "[B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
-                         elif [[ -z "$r" ]]; then tput cnorm; return; fi
+                         case "$r" in
+                             "[A") ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi ;;
+                             "[B") ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi ;;
+                             # Numpad Application Mode (SS3)
+                             "Op") if [ $tot -ge 10 ]; then cur=9; break; fi ;; # 0
+                             "Oq") if [ $tot -ge 1 ]; then cur=0; break; fi ;; # 1
+                             "Or") if [ $tot -ge 2 ]; then cur=1; break; fi ;; # 2
+                             "Os") if [ $tot -ge 3 ]; then cur=2; break; fi ;; # 3
+                             "Ot") if [ $tot -ge 4 ]; then cur=3; break; fi ;; # 4
+                             "Ou") if [ $tot -ge 5 ]; then cur=4; break; fi ;; # 5
+                             "Ov") if [ $tot -ge 6 ]; then cur=5; break; fi ;; # 6
+                             "Ow") if [ $tot -ge 7 ]; then cur=6; break; fi ;; # 7
+                             "Ox") if [ $tot -ge 8 ]; then cur=7; break; fi ;; # 8
+                             "Oy") if [ $tot -ge 9 ]; then cur=8; break; fi ;; # 9
+                             "") tput cnorm; return ;; # ESC key
+                         esac
                     elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
                     elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
                     fi
