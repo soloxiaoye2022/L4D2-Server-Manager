@@ -958,7 +958,7 @@ download_packages() {
     elif [ "$choice" == "2" ]; then
         source_mode="local"
         local target_path=""
-        tui_input "${YELLOW}请输入本地仓库的绝对路径:${NC}" "" "target_path"
+        if ! tui_input "${YELLOW}请输入本地仓库的绝对路径:${NC}" "" "target_path"; then return; fi
         
         if [ ! -d "$target_path" ]; then MENU_TITLE="$M_DOWNLOAD_PACKAGES" tui_msgbox "${RED}目录不存在。${NC}"; return; fi
         source_path="$target_path"
@@ -1108,18 +1108,35 @@ download_packages() {
                     echo -e "${GREEN}解压完成: ${pkg}${NC}"
                     
                     # 修复: 检查并处理嵌套目录 (例如 Package/Package/JS-MODS -> Package/JS-MODS)
-                    # 防止解压后出现双重目录结构
-                    local num_files=$(find "${extract_root}" -mindepth 1 -maxdepth 1 | wc -l)
-                    if [ "$num_files" -eq 1 ]; then
-                        local single_dir=$(find "${extract_root}" -mindepth 1 -maxdepth 1 -type d)
-                        if [ -n "$single_dir" ]; then
-                            echo -e "${CYAN}检测到嵌套目录结构，正在自动优化...${NC}"
-                            # 移动子目录内容到根目录
-                            # 使用 dotglob 确保移动隐藏文件
+                    # 强制查找 JS-MODS 的位置并拉平
+                    local js_mods_path=$(find "${extract_root}" -maxdepth 3 -type d -name "JS-MODS" | head -1)
+                    if [ -n "$js_mods_path" ]; then
+                        local parent_dir=$(dirname "$js_mods_path")
+                        # 如果 JS-MODS 的父目录不是 extract_root，说明有嵌套
+                        if [ "$parent_dir" != "$extract_root" ]; then
+                            echo -e "${CYAN}检测到深层目录结构，正在自动扁平化...${NC}"
+                            
+                            # 移动操作: 将 JS-MODS 所在的父目录下的所有内容移动到 extract_root
                             shopt -s dotglob
-                            mv "$single_dir"/* "${extract_root}/" 2>/dev/null
+                            mv "$parent_dir"/* "${extract_root}/" 2>/dev/null
                             shopt -u dotglob
-                            rmdir "$single_dir" 2>/dev/null
+                            
+                            # 尝试删除空的父目录结构
+                            rmdir "$parent_dir" 2>/dev/null
+                            rmdir "$(dirname "$parent_dir")" 2>/dev/null
+                        fi
+                    else
+                        # 如果没找到 JS-MODS，但只有一层目录，也尝试拉平 (通用情况)
+                        local num_files=$(find "${extract_root}" -mindepth 1 -maxdepth 1 | wc -l)
+                        if [ "$num_files" -eq 1 ]; then
+                            local single_dir=$(find "${extract_root}" -mindepth 1 -maxdepth 1 -type d)
+                            if [ -n "$single_dir" ]; then
+                                echo -e "${CYAN}检测到单层嵌套，尝试拉平...${NC}"
+                                shopt -s dotglob
+                                mv "$single_dir"/* "${extract_root}/" 2>/dev/null
+                                shopt -u dotglob
+                                rmdir "$single_dir" 2>/dev/null
+                            fi
                         fi
                     fi
                     
@@ -1191,45 +1208,50 @@ manage_plugins() {
     local t="$1/left4dead2"
     local rec_dir="$1/.plugin_records"
     
-    # 0. 智能修正路径 (修复用户选择了父目录的问题)
-    # 如果当前路径下包含 JS-MODS 目录，说明用户选了外层目录，自动修正进入 JS-MODS
-    if [ -n "$JS_MODS_DIR" ] && [ -d "$JS_MODS_DIR/JS-MODS" ]; then
-        JS_MODS_DIR="${JS_MODS_DIR}/JS-MODS"
-        # 更新配置
-        echo "$JS_MODS_DIR" > "$PLUGIN_CONFIG"
+    # --- 插件库配置检查逻辑 (Refactored) ---
+    
+    # 1. 尝试从配置文件读取
+    local current_repo=""
+    if [ -f "$PLUGIN_CONFIG" ]; then
+        current_repo=$(cat "$PLUGIN_CONFIG")
     fi
     
-    # 1. 检查插件库设置是否有效
-    local current_repo_valid=false
-    if [ -n "$JS_MODS_DIR" ] && [ -d "$JS_MODS_DIR" ]; then
-        # 严格检查：必须包含至少一个子目录 (插件)，且该目录本身不是 JS-MODS (已在上面修正)
-        if [ "$(find "$JS_MODS_DIR" -mindepth 1 -maxdepth 1 -type d | head -1)" ]; then
-            current_repo_valid=true
-        fi
+    # 2. 验证当前配置是否有效
+    local is_valid=false
+    if [ -n "$current_repo" ] && [ -d "$current_repo" ]; then
+         # 自动修正: 如果指向了父目录，修正为 JS-MODS
+         if [ -d "$current_repo/JS-MODS" ]; then
+             current_repo="${current_repo}/JS-MODS"
+             echo "$current_repo" > "$PLUGIN_CONFIG"
+         fi
+         
+         # 检查目录内是否有内容 (排除 . ..)
+         if [ "$(ls -A "$current_repo")" ]; then
+             is_valid=true
+         fi
     fi
     
-    if [ "$current_repo_valid" = false ]; then
-        # 2. 扫描本地是否有有效包 (包含 JS-MODS)
-        local has_local=false
+    # 3. 如果配置无效，执行自动发现逻辑
+    if [ "$is_valid" = false ]; then
+        # 扫描 downloaded_packages 目录
         local pkg_dir="${FINAL_ROOT}/downloaded_packages"
-        if [ -d "$pkg_dir" ] && find "$pkg_dir" -mindepth 2 -maxdepth 2 -type d -name "JS-MODS" | grep -q .; then
-            has_local=true
+        local valid_repos=()
+        local valid_names=()
+        
+        # 扫描逻辑: 查找包含 JS-MODS 的目录
+        if [ -d "$pkg_dir" ]; then
+            # 使用 while read 循环处理 find 输出，避免文件名空格问题
+            while IFS= read -r -d '' js_mods_path; do
+                valid_repos+=("$js_mods_path")
+                # 提取包名 (JS-MODS 的父目录名)
+                valid_names+=("$(basename "$(dirname "$js_mods_path")")")
+            done < <(find "$pkg_dir" -type d -name "JS-MODS" -print0)
         fi
         
-        if [ "$has_local" = true ]; then
-            # 有本地包 -> 提示去选择
-            MENU_TITLE="$M_PLUG_MANAGE" \
-            tui_menu "$M_REPO_INVALID_HAS_LOCAL" \
-                "1. $M_GO_SELECT_REPO" \
-                "2. $M_RETURN"
-            
-            if [ $? -eq 0 ]; then
-                set_plugin_repo
-            else
-                return
-            fi
-        else
-            # 无本地包 -> 提示去下载
+        local count=${#valid_repos[@]}
+        
+        if [ $count -eq 0 ]; then
+            # Case 0: 无有效包 -> 提示下载
             MENU_TITLE="$M_PLUG_MANAGE" \
             tui_menu "$M_REPO_INVALID_NO_LOCAL" \
                 "1. $M_GO_DOWNLOAD" \
@@ -1237,20 +1259,48 @@ manage_plugins() {
             
             if [ $? -eq 0 ]; then
                 download_packages
-                # download_packages 可能会自动设置
+                return
             else
                 return
             fi
-        fi
-        
-        # 3. 再次检查 (刷新配置)
-        if [ -f "$PLUGIN_CONFIG" ]; then JS_MODS_DIR=$(cat "$PLUGIN_CONFIG"); fi
-        
-        if [ -z "$JS_MODS_DIR" ] || [ ! -d "$JS_MODS_DIR" ]; then
-             MENU_TITLE="$M_PLUG_MANAGE" tui_msgbox "$M_REPO_STILL_INVALID"
-             return
+            
+        elif [ $count -eq 1 ]; then
+            # Case 1: 只有一个有效包 -> 自动选择
+            current_repo="${valid_repos[0]}"
+            echo "$current_repo" > "$PLUGIN_CONFIG"
+            MENU_TITLE="$M_PLUG_MANAGE" tui_msgbox "${GREEN}$M_REPO_AUTO_SET\n${CYAN}$current_repo${NC}"
+            is_valid=true
+            
+        else
+            # Case >1: 多个有效包 -> 菜单选择
+             local menu_opts=()
+             for name in "${valid_names[@]}"; do
+                 menu_opts+=("$name")
+             done
+             
+             MENU_TITLE="$M_REPO_SELECT_TITLE" \
+             tui_menu "$M_REPO_SELECT_MSG" "${menu_opts[@]}"
+             
+             local sel=$?
+             if [ $sel -ne 255 ] && [ $sel -lt $count ]; then
+                 current_repo="${valid_repos[$sel]}"
+                 echo "$current_repo" > "$PLUGIN_CONFIG"
+                 MENU_TITLE="$M_PLUG_MANAGE" tui_msgbox "${GREEN}$M_REPO_AUTO_SET\n${CYAN}$current_repo${NC}"
+                 is_valid=true
+             else
+                 return
+             fi
         fi
     fi
+    
+    # 最终检查
+    if [ "$is_valid" = false ]; then
+        MENU_TITLE="$M_PLUG_MANAGE" tui_msgbox "$M_REPO_STILL_INVALID"
+        return
+    fi
+    
+    # 更新全局变量
+    JS_MODS_DIR="$current_repo"
     
     mkdir -p "$rec_dir"
     
