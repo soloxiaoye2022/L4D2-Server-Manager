@@ -228,6 +228,12 @@ download_file() {
     
     # 鲁棒性处理: 如果传入的 git_path 已经包含了常见的代理前缀，则尝试移除它们
     # 这可以防止双重代理导致的 URL 错误
+    # 移除常见代理前缀
+    git_path="${git_path#*gh-proxy.com/}"
+    git_path="${git_path#*gh-proxy.net/}"
+    git_path="${git_path#*ghfast.top/}"
+    git_path="${git_path#*jiashu.1win.eu.org/}"
+    
     if [[ "$git_path" == *"/https://"* ]]; then
         git_path="${git_path##*/https://}"
         # 恢复 https:// 前缀如果被截断后只是 raw.github...
@@ -638,11 +644,13 @@ self_update() {
     # Since we are updating the script itself, we want high reliability.
     
     if download_file "soloxiaoye2022/server_install/main/server_install/linux/init.sh" "$temp" "Update Script"; then
-        if grep -q "main()" "$temp"; then
+        # 增加文件大小校验 (>10KB) 防止下载到错误页面
+        local fsize=$(wc -c < "$temp" 2>/dev/null || echo 0)
+        if grep -q "main()" "$temp" && [ "$fsize" -gt 10240 ]; then
             mv "$temp" "$FINAL_ROOT/l4m"; chmod +x "$FINAL_ROOT/l4m"
             MENU_TITLE="$M_UPDATE" tui_msgbox "$M_UPDATE_SUCCESS"; exec "$FINAL_ROOT/l4m"
         else
-            MENU_TITLE="$M_UPDATE" tui_msgbox "$M_VERIFY_FAIL\n\n${YELLOW}Debug Info:${NC}\nFile size: $(wc -c < "$temp" 2>/dev/null) bytes\n$(head -n 10 "$temp")"
+            MENU_TITLE="$M_UPDATE" tui_msgbox "$M_VERIFY_FAIL\n\n${YELLOW}Debug Info:${NC}\nFile size: $fsize bytes\nContent head:\n$(head -n 5 "$temp")"
             rm "$temp"
         fi
     else
