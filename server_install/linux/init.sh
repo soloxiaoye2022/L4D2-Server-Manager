@@ -1366,9 +1366,12 @@ inst_plat() {
 #=============================================================================
 
 load_i18n() {
-    # 移除可能存在的空白字符（如换行符）
-    local lang=$(echo "$1" | tr -d '[:space:]')
-    if [ "$lang" == "zh" ]; then
+    local raw="$1"
+    # 使用 Bash 内置替换去除所有空白字符 (比 tr 更快且不依赖外部命令)
+    local lang="${raw//[[:space:]]/}"
+    
+    # 宽松匹配：只要包含 zh 就认为是中文
+    if [[ "$lang" == *"zh"* ]]; then
         M_TITLE="=== L4D2 管理器 (L4M) ==="
         M_WELCOME="欢迎使用 L4D2 Server Manager (L4M)"
         M_TEMP_RUN="检测到您当前通过临时方式运行 (管道/临时目录)。"
