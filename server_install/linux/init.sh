@@ -78,6 +78,39 @@ else
 fi
 mkdir -p "$JS_MODS_DIR"
 
+# 链接清单定义
+LINK_DIRS=(
+    "left4dead2/bin"
+    "left4dead2/downloads"
+    "left4dead2/expressions"
+    "left4dead2/gfx"
+    "left4dead2/maps"
+    "left4dead2/materials"
+    "left4dead2/reslists"
+    "left4dead2/resource"
+    "left4dead2/scenes"
+    "left4dead2_dlc1"
+    "left4dead2_dlc2"
+    "left4dead2_dlc3"
+    "left4dead2_lv"
+    "platform"
+    "update"
+)
+
+LINK_FILES_ROOT=(
+    "left4dead2/gameinfo.txt"
+    "left4dead2/glbaseshaders.cfg"
+    "left4dead2/lights.rad"
+    "left4dead2/mapcycle.txt"
+    "left4dead2/maplist.txt"
+    "left4dead2/missioncycle.txt"
+    "left4dead2/modelsounds.cache"
+    "left4dead2/pak01_dir.vpk"
+    "left4dead2/program_cache.cfg"
+    "left4dead2/steam.inf"
+    "left4dead2/whitelist.cfg"
+)
+
 # 颜色定义
 RED='\033[31m'
 GREEN='\033[32m'
@@ -784,9 +817,10 @@ deploy_wizard() {
     
     echo -e "$M_COPY_CACHE"
     mkdir -p "$path"
-    if ! cp -rf --reflink=auto "$SERVER_CACHE_DIR/"* "$path/" 2>/dev/null; then
-        cp -rf "$SERVER_CACHE_DIR/"* "$path/"
-    fi
+    
+    # 使用新的链接部署逻辑
+    deploy_with_links "$SERVER_CACHE_DIR" "$path"
+    
     rm -f "$path/update_cache.txt"
     
     # 3. Create local update.txt
@@ -1699,7 +1733,7 @@ control_panel() {
         
         # 设置 Box Title 为服务器名称，Text 为状态信息
         MENU_TITLE="管理实例: $n" \
-        tui_menu "$info_str" "$M_OPT_START" "$M_OPT_STOP" "$M_OPT_RESTART" "$M_OPT_UPDATE" "$M_OPT_CONSOLE" "$M_OPT_LOGS" "$M_OPT_TRAFFIC" "$M_OPT_ARGS" "$M_OPT_PLUGINS" "$a_txt" "$M_OPT_BACKUP" "$M_OPT_DELETE" "$M_RETURN"
+        tui_menu "$info_str" "$M_OPT_START" "$M_OPT_STOP" "$M_OPT_RESTART" "$M_OPT_UPDATE" "$M_OPT_CONSOLE" "$M_OPT_LOGS" "$M_OPT_TRAFFIC" "$M_OPT_ARGS" "$M_OPT_PLUGINS" "链接管理 / Link Manager" "$a_txt" "$M_OPT_BACKUP" "$M_OPT_DELETE" "$M_RETURN"
         case $? in
             0) start_srv "$n" "$p" "$port" ;;
             1) stop_srv "$n" ;;
@@ -1710,13 +1744,226 @@ control_panel() {
             6) view_traffic "$n" "$port" ;;
             7) edit_args "$p" ;;
             8) plugins_menu "$p" ;;
-            9) toggle_auto "$n" "$line"; break ;; 
-            10) backup_srv "$n" "$p" ;;
-            11) if delete_srv "$n" "$p"; then return; fi ;;
-            12|255) return ;;
+            9) manage_links_menu "$n" "$p" ;;
+            10) toggle_auto "$n" "$line"; break ;; 
+            11) backup_srv "$n" "$p" ;;
+            12) if delete_srv "$n" "$p"; then return; fi ;;
+            13|255) return ;;
         esac
     done
     control_panel "$n"
+}
+
+# 链接部署逻辑
+deploy_with_links() {
+    local src="$1"
+    local dest="$2"
+    
+    # 1. 创建基础目录结构
+    mkdir -p "$dest/left4dead2"
+    
+    # 2. 复制必要的二进制文件 (不链接)
+    cp -f "$src/srcds_run" "$dest/" 2>/dev/null
+    cp -f "$src/srcds_linux" "$dest/" 2>/dev/null
+    cp -f "$src/left4dead2/steam.inf" "$dest/left4dead2/" 2>/dev/null # steam.inf 经常变动，建议复制
+    
+    # 3. 链接目录
+    for d in "${LINK_DIRS[@]}"; do
+        if [ -d "$src/$d" ]; then
+            # 确保父目录存在
+            mkdir -p "$(dirname "$dest/$d")"
+            ln -sf "$src/$d" "$dest/$d"
+        fi
+    done
+    
+    # 4. 链接根文件
+    for f in "${LINK_FILES_ROOT[@]}"; do
+        if [ -f "$src/$f" ]; then
+            mkdir -p "$(dirname "$dest/$f")"
+            ln -sf "$src/$f" "$dest/$f"
+        fi
+    done
+    
+    # 4.1 链接 VPK (pak01_000.vpk - pak01_999.vpk)
+    # 使用通配符查找所有 vpk
+    find "$src/left4dead2" -maxdepth 1 -name "pak01_*.vpk" -print0 | while IFS= read -r -d '' vpk; do
+        local vpk_name=$(basename "$vpk")
+        ln -sf "$vpk" "$dest/left4dead2/$vpk_name"
+    done
+    
+    # 5. 链接 scripts 目录下的文件 (不链接目录本身)
+    mkdir -p "$dest/left4dead2/scripts"
+    if [ -d "$src/left4dead2/scripts" ]; then
+        find "$src/left4dead2/scripts" -maxdepth 1 -type f -print0 | while IFS= read -r -d '' file; do
+            local fname=$(basename "$file")
+            ln -sf "$file" "$dest/left4dead2/scripts/$fname"
+        done
+    fi
+    
+    # 6. 链接 cfg 目录下的文件 (不链接目录本身，排除特定文件)
+    mkdir -p "$dest/left4dead2/cfg"
+    if [ -d "$src/left4dead2/cfg" ]; then
+        find "$src/left4dead2/cfg" -maxdepth 1 -type f -print0 | while IFS= read -r -d '' file; do
+            local fname=$(basename "$file")
+            # 排除服务器特定配置
+            if [[ "$fname" != "server.cfg" && "$fname" != "banned_user.cfg" && "$fname" != "banned_ip.cfg" ]]; then
+                ln -sf "$file" "$dest/left4dead2/cfg/$fname"
+            fi
+        done
+    fi
+    
+    # 7. 创建空目录 (addons, logs 等)
+    mkdir -p "$dest/left4dead2/addons"
+    mkdir -p "$dest/left4dead2/logs"
+}
+
+manage_links_menu() {
+    local n="$1"
+    local p="$2"
+    
+    while true; do
+        local opts=()
+        
+        # 构建菜单项，显示链接状态
+        # 1. Maps
+        local st_maps="[COPIED]"
+        if [ -L "$p/left4dead2/maps" ]; then st_maps="${GREEN}[LINKED]${NC}"; else st_maps="${YELLOW}[COPIED]${NC}"; fi
+        opts+=("Maps Directory $st_maps")
+        
+        # 2. Materials
+        local st_mat="[COPIED]"
+        if [ -L "$p/left4dead2/materials" ]; then st_mat="${GREEN}[LINKED]${NC}"; else st_mat="${YELLOW}[COPIED]${NC}"; fi
+        opts+=("Materials Directory $st_mat")
+        
+        # 3. Models
+        # Models 默认是不链接的，但如果用户想链接呢？清单里没说要链接 models，
+        # 清单说 "models... 不需要链接"。但这里是管理菜单，也许用户想链接？
+        # 暂时只提供清单里的主要目录
+        
+        # 3. Sound? (Resource/Sound) - resource is linked
+        local st_res="[COPIED]"
+        if [ -L "$p/left4dead2/resource" ]; then st_res="${GREEN}[LINKED]${NC}"; else st_res="${YELLOW}[COPIED]${NC}"; fi
+        opts+=("Resource Directory $st_res")
+        
+        # 4. DLCs
+        local st_dlc="[COPIED]"
+        if [ -L "$p/left4dead2_dlc1" ] && [ -L "$p/left4dead2_dlc2" ] && [ -L "$p/left4dead2_dlc3" ]; then 
+            st_dlc="${GREEN}[LINKED]${NC}"
+        else 
+            st_dlc="${YELLOW}[COPIED]${NC}"
+        fi
+        opts+=("DLC Directories (1-3) $st_dlc")
+        
+        # 5. VPK Files
+        # 检查一个代表性的 vpk
+        local st_vpk="[COPIED]"
+        if [ -L "$p/left4dead2/pak01_dir.vpk" ]; then st_vpk="${GREEN}[LINKED]${NC}"; else st_vpk="${YELLOW}[COPIED]${NC}"; fi
+        opts+=("VPK Files (pak01_*.vpk) $st_vpk")
+        
+        opts+=("$M_RETURN")
+        
+        MENU_TITLE="链接管理: $n" \
+        tui_menu "选择要切换模式的项目 (Linked <-> Copied)\n${GREY}注意: 转换为独立副本会占用更多空间${NC}" "${opts[@]}"
+        
+        local choice=$?
+        if [ $choice -eq 5 ] || [ $choice -eq 255 ]; then return; fi
+        
+        case $choice in
+            0) toggle_link_dir "$p/left4dead2/maps" "$SERVER_CACHE_DIR/left4dead2/maps" ;;
+            1) toggle_link_dir "$p/left4dead2/materials" "$SERVER_CACHE_DIR/left4dead2/materials" ;;
+            2) toggle_link_dir "$p/left4dead2/resource" "$SERVER_CACHE_DIR/left4dead2/resource" ;;
+            3) 
+                toggle_link_dir "$p/left4dead2_dlc1" "$SERVER_CACHE_DIR/left4dead2_dlc1" 
+                toggle_link_dir "$p/left4dead2_dlc2" "$SERVER_CACHE_DIR/left4dead2_dlc2"
+                toggle_link_dir "$p/left4dead2_dlc3" "$SERVER_CACHE_DIR/left4dead2_dlc3"
+                ;;
+            4) toggle_link_vpks "$p/left4dead2" "$SERVER_CACHE_DIR/left4dead2" ;;
+        esac
+    done
+}
+
+toggle_link_dir() {
+    local link_path="$1"
+    local source_path="$2"
+    local name=$(basename "$link_path")
+    
+    if [ -L "$link_path" ]; then
+        # 当前是链接 -> 转为副本
+        # 逻辑：把链接指向的内容复制到临时目录 -> 删除链接 -> 移回/复制回
+        
+        MENU_TITLE="取消链接: $name" \
+        tui_menu "即将把 '$name' 转换为独立副本。\n这将从主服务端缓存复制文件到此实例。" \
+            "1. 确认 (Confirm)" "2. 取消 (Cancel)"
+        if [ $? -ne 0 ]; then return; fi
+        
+        echo -e "${YELLOW}正在解除链接并复制文件...${NC}"
+        
+        # 1. 记录原始链接指向 (为了安全)
+        local target=$(readlink -f "$link_path")
+        
+        # 2. 删除链接
+        rm "$link_path"
+        
+        # 3. 复制源文件到此位置
+        # 注意: cp -r 会复制整个目录
+        if cp -r "$source_path" "$link_path"; then
+            MENU_TITLE="取消链接" tui_msgbox "${GREEN}成功！'$name' 现在是独立副本。${NC}"
+        else
+            MENU_TITLE="取消链接" tui_msgbox "${RED}复制失败！尝试恢复链接...${NC}"
+            ln -sf "$source_path" "$link_path"
+        fi
+        
+    elif [ -d "$link_path" ]; then
+        # 当前是目录 -> 转为链接
+        MENU_TITLE="创建链接: $name" \
+        tui_menu "${RED}警告: 即将删除本地目录 '$name' 并替换为链接。${NC}\n本地文件将丢失(除非您已备份)！" \
+            "1. 确认删除并链接 (Delete & Link)" "2. 取消 (Cancel)"
+        if [ $? -ne 0 ]; then return; fi
+        
+        echo -e "${YELLOW}正在删除本地文件并创建链接...${NC}"
+        rm -rf "$link_path"
+        ln -sf "$source_path" "$link_path"
+        MENU_TITLE="创建链接" tui_msgbox "${GREEN}成功！'$name' 现在链接到主服务端。${NC}"
+    else
+        MENU_TITLE="错误" tui_msgbox "${RED}路径不存在或类型未知: $link_path${NC}"
+    fi
+}
+
+toggle_link_vpks() {
+    local inst_dir="$1"
+    local cache_dir="$2"
+    
+    # 检查状态
+    if [ -L "$inst_dir/pak01_dir.vpk" ]; then
+        # Unlink
+        MENU_TITLE="取消链接: VPKs" \
+        tui_menu "即将把 VPK 文件转换为独立副本 (占用约几GB空间)。" \
+            "1. 确认 (Confirm)" "2. 取消 (Cancel)"
+        if [ $? -ne 0 ]; then return; fi
+        
+        echo -e "${YELLOW}正在处理 VPK 文件...${NC}"
+        
+        find "$inst_dir" -maxdepth 1 -name "pak01_*.vpk" -type l -delete
+        cp "$cache_dir"/pak01_*.vpk "$inst_dir/"
+        
+        MENU_TITLE="取消链接" tui_msgbox "${GREEN}VPK 文件已转换为独立副本。${NC}"
+    else
+        # Link
+        MENU_TITLE="创建链接: VPKs" \
+        tui_menu "${RED}即将删除本地 VPK 并使用链接 (节省空间)。${NC}" \
+            "1. 确认 (Confirm)" "2. 取消 (Cancel)"
+        if [ $? -ne 0 ]; then return; fi
+        
+        echo -e "${YELLOW}正在链接 VPK 文件...${NC}"
+        rm -f "$inst_dir"/pak01_*.vpk
+        
+        find "$cache_dir" -maxdepth 1 -name "pak01_*.vpk" -print0 | while IFS= read -r -d '' vpk; do
+            local vpk_name=$(basename "$vpk")
+            ln -sf "$vpk" "$inst_dir/$vpk_name"
+        done
+        
+        MENU_TITLE="创建链接" tui_msgbox "${GREEN}VPK 文件已链接。${NC}"
+    fi
 }
 
 update_srv() {
