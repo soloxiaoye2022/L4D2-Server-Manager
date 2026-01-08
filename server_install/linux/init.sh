@@ -1467,9 +1467,11 @@ control_panel() {
 update_srv() {
     local n="$1"; local p="$2"
     if [ "$(get_status "$n")" == "RUNNING" ]; then
-        echo -e "$M_STOP_BEFORE_UPDATE"
-        read -p "$M_ASK_STOP_UPDATE" c
-        if [[ "$c" != "y" && "$c" != "Y" ]]; then return; fi
+        MENU_TITLE="更新服务端" \
+        tui_menu "$M_STOP_BEFORE_UPDATE\n$M_ASK_STOP_UPDATE" \
+            "1. 是 (Yes)" \
+            "2. 否 (No)"
+        if [ $? -ne 0 ]; then return; fi
         stop_srv "$n"
     fi
     
@@ -1478,9 +1480,12 @@ update_srv() {
     local cache_script="${SERVER_CACHE_DIR}/update_cache.txt"
     
     if [ ! -f "$cache_script" ]; then
-        echo -e "$M_ASK_REBUILD"
-        read -p "> " c
-        if [[ "$c" == "y" || "$c" == "Y" ]]; then
+        MENU_TITLE="更新服务端" \
+        tui_menu "$M_NO_UPDATE_SCRIPT\n$M_ASK_REBUILD" \
+            "1. 是 (Yes)" \
+            "2. 否 (No)"
+            
+        if [ $? -eq 0 ]; then
             echo "force_install_dir \"$SERVER_CACHE_DIR\"" > "$cache_script"
             echo "login anonymous" >> "$cache_script"
             echo "@sSteamCmdForcePlatformType linux" >> "$cache_script"
@@ -1628,10 +1633,15 @@ backup_srv() {
 
 delete_srv() {
     local n="$1"; local p="$2"
-    tui_header
-    printf "$M_ASK_DELETE" "$n" "$p"
-    read -p "" c
-    if [[ "$c" != "y" && "$c" != "Y" ]]; then echo -e "$M_DELETE_CANCEL"; sleep 1; return 1; fi
+    
+    local prompt_text=$(printf "$M_ASK_DELETE" "$n" "$p")
+    
+    MENU_TITLE="删除实例" \
+    tui_menu "$prompt_text" \
+        "1. 确认删除 (Yes)" \
+        "2. 取消 (No)"
+        
+    if [ $? -ne 0 ]; then echo -e "$M_DELETE_CANCEL"; sleep 1; return 1; fi
     
     if [ "$(get_status "$n")" == "RUNNING" ]; then
         stop_srv "$n"
@@ -1911,13 +1921,22 @@ change_repo_source() {
         read -n 1 -s -r; return
     fi
     
-    echo -e "\n请选择要更换的国内源:"
-    echo "1. 阿里云 (Aliyun) - 推荐"
-    echo "2. 清华大学 (TUNA)"
-    echo "3. 腾讯云 (Tencent)"
-    echo "4. 还原官方源 (Restore)"
-    echo "5. 返回"
-    read -p "> " choice
+    MENU_TITLE="Linux 智能换源助手" \
+    tui_menu "检测到系统: ${GREEN}${dist} ${ver} (${code})${NC}\n请选择要更换的国内源:" \
+        "1. 阿里云 (Aliyun) - 推荐" \
+        "2. 清华大学 (TUNA)" \
+        "3. 腾讯云 (Tencent)" \
+        "4. 还原官方源 (Restore)" \
+        "5. 返回"
+    
+    local choice
+    case $? in
+        0) choice="1" ;;
+        1) choice="2" ;;
+        2) choice="3" ;;
+        3) choice="4" ;;
+        *) return ;;
+    esac
     
     local domain=""
     case "$choice" in
@@ -1998,11 +2017,14 @@ main() {
     esac
     
     if [ ! -f "$CONFIG_FILE" ]; then
-        clear; echo -e "${BLUE}=== L4D2 Manager (L4M) ===${NC}\n"
-        echo "Please select language / 请选择语言:"
-        echo "1. English"
-        echo "2. 简体中文"
-        read -p "> " l
+        MENU_TITLE="=== L4D2 Manager (L4M) ===" \
+        tui_menu "Please select language / 请选择语言:" \
+            "1. English" \
+            "2. 简体中文"
+            
+        local l="1"
+        if [ $? -eq 1 ]; then l="2"; fi
+        
         if [ "$l" == "2" ]; then echo "zh" > "$CONFIG_FILE"; else echo "en" > "$CONFIG_FILE"; fi
         if [ "$l" == "2" ] && [ "$EUID" -eq 0 ]; then
              if [ -f /etc/debian_version ]; then
@@ -2025,11 +2047,12 @@ main() {
             echo -e "${GREEN}$M_FOUND_EXISTING${NC}"; sleep 1; exec "$exist_path" "$@"
         fi
 
-        tui_header
-        echo -e "${YELLOW}$M_WELCOME${NC}\n$M_TEMP_RUN\n"
-        echo -e "$M_REC_INSTALL\n$M_F_PERSIST\n$M_F_ACCESS\n$M_F_ADV\n"
-        read -p "$M_ASK_INSTALL" c; c=${c:-y}
-        if [[ "$c" == "y" || "$c" == "Y" ]]; then install_smart; exit 0; fi
+        MENU_TITLE="L4D2 Manager (L4M)" \
+        tui_menu "$M_WELCOME\n$M_TEMP_RUN\n\n$M_REC_INSTALL\n$M_F_PERSIST\n$M_F_ACCESS\n$M_F_ADV" \
+            "1. 立即安装 (Install)" \
+            "2. 临时运行 (Temp Mode)"
+            
+        if [ $? -eq 0 ]; then install_smart; exit 0; fi
         echo -e "$M_TEMP_MODE"; sleep 1
     fi
     
