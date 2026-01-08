@@ -2026,11 +2026,42 @@ change_repo_source() {
             echo "deb http://${domain}/ubuntu/ ${code}-security main restricted universe multiverse" >> "$file"
             
         elif [ "$dist" == "centos" ]; then
-            # CentOS 简单处理 (使用 curl 下载对应 repo，这里简化为通用逻辑或提示)
-            echo -e "${YELLOW}CentOS 换源建议使用: curl -o /etc/yum.repos.d/CentOS-Base.repo http://${domain}/repo/Centos-${ver}.repo${NC}"
-            # 尝试直接下载
-            local repo_ver=$(echo "$ver" | cut -d. -f1)
-            curl -o /etc/yum.repos.d/CentOS-Base.repo "http://${domain}/repo/Centos-${repo_ver}.repo"
+            # CentOS 智能生成 (支持 7 和 8-Stream)
+            local centos_ver=$(echo "$ver" | cut -d. -f1)
+            
+            if [ "$centos_ver" == "7" ]; then
+                case "$domain" in
+                    "mirrors.aliyun.com")
+                         curl -o /etc/yum.repos.d/CentOS-Base.repo http://mirrors.aliyun.com/repo/Centos-7.repo
+                         ;;
+                    "mirrors.cloud.tencent.com")
+                         curl -o /etc/yum.repos.d/CentOS-Base.repo http://mirrors.cloud.tencent.com/repo/centos7_base.repo
+                         ;;
+                    "mirrors.tuna.tsinghua.edu.cn")
+                         # Tuna 不提供直接下载，使用 sed 修改
+                         sed -e 's|^mirrorlist=|#mirrorlist=|g' \
+                             -e 's|^#baseurl=http://mirror.centos.org/centos|baseurl=https://mirrors.tuna.tsinghua.edu.cn/centos|g' \
+                             -i /etc/yum.repos.d/CentOS-Base.repo
+                         ;;
+                esac
+            elif [ "$centos_ver" == "8" ]; then
+                # 假设是 CentOS Stream 8 (因为 CentOS 8 已EOL)
+                # 使用 sed 批量替换所有 repo 文件
+                local proto="http"
+                if [ "$domain" == "mirrors.tuna.tsinghua.edu.cn" ]; then proto="https"; fi
+                
+                # 备份原始文件已经在上面做了
+                sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*.repo
+                sed -i "s|#baseurl=http://mirror.centos.org|baseurl=${proto}://${domain}|g" /etc/yum.repos.d/CentOS-*.repo
+                
+                # Tuna 特殊处理
+                if [ "$domain" == "mirrors.tuna.tsinghua.edu.cn" ]; then
+                     sed -i "s|baseurl=https://${domain}/|baseurl=https://${domain}/centos-stream/|g" /etc/yum.repos.d/CentOS-*.repo
+                fi
+            else
+                 MENU_TITLE="换源结果" tui_msgbox "${YELLOW}未知的 CentOS 版本: $ver\n请手动配置。${NC}"
+                 return
+            fi
         fi
         MENU_TITLE="换源结果" tui_msgbox "${GREEN}源文件已更新。${NC}\n正在刷新缓存..."
     fi
