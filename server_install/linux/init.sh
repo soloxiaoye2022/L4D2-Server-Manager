@@ -464,8 +464,12 @@ tui_menu() {
         local h=$((term_lines - 4))
         if [ $h -gt 30 ]; then h=30; fi
         
-        local list_h=$((h - 10))
+        # 列表高度 = 总高度 - 顶部标题栏/边框(大约8)
+        # 务必保证有足够的空间显示列表，否则列表内容会不可见
+        local list_h=$((h - 8))
         if [ $list_h -lt 5 ]; then list_h=5; fi
+        # 如果总高度不足以容纳最小列表，强制增加总高度
+        if [ $((list_h + 8)) -gt $h ]; then h=$((list_h + 8)); fi
         
         local box_title="${MENU_TITLE:-$M_TITLE}"
         
