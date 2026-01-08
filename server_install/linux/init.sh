@@ -118,7 +118,8 @@ check_deps() {
     if [ -f /etc/debian_version ]; then
         local deb_pkgs="${miss[*]}"
         deb_pkgs=$(echo "$deb_pkgs" | sed 's/7z/p7zip-full/g')
-        cmd="apt-get update -qq && apt-get install -y -qq $deb_pkgs lib32gcc-s1 lib32stdc++6 ca-certificates"
+        # 使用 ; 替代 &&，确保即使 update 因个别源报错（如 Release file 缺失），也能尝试继续安装依赖
+        cmd="apt-get update -qq; apt-get install -y -qq --fix-missing $deb_pkgs lib32gcc-s1 lib32stdc++6 ca-certificates"
     elif [ -f /etc/redhat-release ]; then
         local rhel_pkgs="${miss[*]}"
         rhel_pkgs=$(echo "$rhel_pkgs" | sed 's/7z/p7zip/g')
