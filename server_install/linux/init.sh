@@ -642,10 +642,11 @@ install_smart() {
         MENU_TITLE="$M_INIT_INSTALL" tui_msgbox "$M_LINK_FAIL l4m='$target_dir/l4m'"
     fi
     
+    # 修复：正确迁移旧配置，避免覆盖为空
     if [ "$MANAGER_ROOT" != "$target_dir" ]; then
-         if [ -f "${MANAGER_ROOT}/servers.dat" ]; then cp "${MANAGER_ROOT}/servers.dat" "$target_dir/"; fi
-         if [ -f "${MANAGER_ROOT}/config.dat" ]; then cp "${MANAGER_ROOT}/config.dat" "$target_dir/"; fi
-         if [ -f "${MANAGER_ROOT}/plugin_config.dat" ]; then cp "${MANAGER_ROOT}/plugin_config.dat" "$target_dir/"; fi
+         if [ -s "${MANAGER_ROOT}/servers.dat" ]; then cp -f "${MANAGER_ROOT}/servers.dat" "$target_dir/"; fi
+         if [ -s "${MANAGER_ROOT}/config.dat" ]; then cp -f "${MANAGER_ROOT}/config.dat" "$target_dir/"; fi
+         if [ -s "${MANAGER_ROOT}/plugin_config.dat" ]; then cp -f "${MANAGER_ROOT}/plugin_config.dat" "$target_dir/"; fi
     fi
     touch "$target_dir/servers.dat"
     
