@@ -1838,20 +1838,11 @@ install_all_deps_smart() {
         elif [[ "$dist" == "debian" ]]; then
             # 提取主版本号 (如 11)
             local major_ver=$(echo "$ver" | cut -d. -f1)
-            if [ "$major_ver" -le 10 ]; then
+            if [ -n "$major_ver" ] && [ "$major_ver" -le 10 ]; then
                 lib32gcc="lib32gcc1"
             else
                 lib32gcc="lib32gcc-s1"
             fi
-        fi
-        
-        # 这是一个简单的试探，如果 apt-cache 报错(如源坏了)，默认为上述逻辑判断结果
-        # 但如果缓存中明确有 lib32gcc1，则优先使用
-        if apt-cache show lib32gcc1 >/dev/null 2>&1; then 
-             # 只有当系统判定为新版但缓存里只有旧版时才覆盖？
-             # 不，apt-cache 准确性更高。但为了保险，我们构建列表时可以两个都加上（利用 apt 的自动消歧义或报错忽略）
-             # 实际上，最稳妥的是根据系统版本严格指定。
-             :
         fi
         
         pkg_list="tmux curl wget tar tree sed gawk lsof p7zip-full unzip file whiptail $lib32gcc lib32stdc++6 ca-certificates"
