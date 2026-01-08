@@ -465,6 +465,14 @@ download_file() {
     if [ "$success" = true ]; then return 0; else echo -e "${RED}下载失败。${NC}"; return 1; fi
 }
 
+# 去除颜色代码函数
+strip_colors() {
+    # 1. 去除 literal \033 (例如变量定义的颜色)
+    # 2. 去除 hex \x1b (真实转义符)
+    # 3. 去除可能的 \e
+    echo "$1" | sed -r 's/\\033\[[0-9;]*m//g' | sed -r 's/\x1b\[[0-9;]*m//g' | sed -r 's/\\e\[[0-9;]*m//g'
+}
+
 #=============================================================================
 # 4. TUI 界面框架
 #=============================================================================
@@ -478,8 +486,9 @@ tui_msgbox() {
     
     if command -v whiptail >/dev/null 2>&1; then
         # 移除颜色代码
-        local clean_t=$(echo -e "$t" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
+        local clean_t=$(strip_colors "$t")
         local box_title="${MENU_TITLE:-$M_TITLE}"
+        local clean_title=$(strip_colors "$box_title")
         
         # 计算最长行的长度
         local max_line_len=0
@@ -503,7 +512,7 @@ tui_msgbox() {
         local term_lines=$(tput lines)
         if [ $h -gt $((term_lines - 4)) ]; then h=$((term_lines - 4)); fi
         
-        whiptail --title "$box_title" --msgbox "$clean_t" $h $w
+        whiptail --title "$clean_title" --msgbox "$clean_t" $h $w
     else
         tui_header
         echo -e "${YELLOW}$t${NC}"
@@ -522,11 +531,12 @@ tui_input() {
         if [ "$pass" == "true" ]; then type="--passwordbox"; fi
         
         # 移除颜色代码，防止 whiptail 标题乱码
-        local clean_p=$(echo -e "$p" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
+        local clean_p=$(strip_colors "$p")
         local box_title="${MENU_TITLE:-$M_TITLE}"
+        local clean_title=$(strip_colors "$box_title")
         
         local val
-        val=$(whiptail --title "$box_title" "$type" "$clean_p" $h $w "$d" 3>&1 1>&2 2>&3)
+        val=$(whiptail --title "$clean_title" "$type" "$clean_p" $h $w "$d" 3>&1 1>&2 2>&3)
         
         if [ $? -eq 0 ]; then
             eval $v=\"\$val\"
@@ -548,13 +558,13 @@ tui_menu() {
     
     if command -v whiptail >/dev/null 2>&1; then
         # 修复: 清理标题中的颜色代码
-        local clean_title=$(echo -e "$t" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
+        local clean_title=$(strip_colors "$t")
         local max_len=${#clean_title}
         
         local args=()
         for ((i=0; i<tot; i++)); do
             # 移除颜色代码
-            local clean_opt=$(echo "${opts[i]}" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
+            local clean_opt=$(strip_colors "${opts[i]}")
             # 修复: 移除可能存在的 "1. " 序号前缀
             clean_opt=$(echo "$clean_opt" | sed 's/^[0-9]*[.]\s*//')
             
@@ -600,9 +610,10 @@ tui_menu() {
         if [ $list_h -lt 1 ]; then list_h=1; fi
 
         local box_title="${MENU_TITLE:-$M_TITLE}"
+        local clean_box_title=$(strip_colors "$box_title")
         
         local choice
-        if choice=$(whiptail --title "$box_title" --menu "$clean_title" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3); then
+        if choice=$(whiptail --title "$clean_box_title" --menu "$clean_title" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3); then
             return $((choice-1))
         else
             # 只有当用户明确取消 (exit 1) 或 ESC (exit 255) 时才返回错误
