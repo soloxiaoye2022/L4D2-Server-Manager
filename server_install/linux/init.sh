@@ -694,11 +694,18 @@ download_packages() {
     local pkg_dir="${FINAL_ROOT}/downloaded_packages"
     mkdir -p "$pkg_dir"
     
-    echo -e "${YELLOW}请选择操作:${NC}"
-    echo -e "1. 从 GitHub 镜像站下载 (网络)"
-    echo -e "2. 从本地仓库导入 (需手动输入路径)"
-    echo -e "3. 返回"
-    read -p "> " choice
+    MENU_TITLE="$M_DOWNLOAD_PACKAGES" \
+    tui_menu "请选择操作:" \
+        "1. 从 GitHub 镜像站下载 (网络)" \
+        "2. 从本地仓库导入 (需手动输入路径)" \
+        "$M_RETURN"
+        
+    local choice
+    case $? in
+        0) choice="1" ;;
+        1) choice="2" ;;
+        *) return ;;
+    esac
     
     local pkg_array=()
     local source_mode=""
@@ -1144,10 +1151,19 @@ plugins_menu() {
 set_plugin_repo() {
     tui_header; echo -e "$M_CUR_REPO $JS_MODS_DIR"
     local pkg_dir="${FINAL_ROOT}/downloaded_packages"
-    echo -e "${YELLOW}1. 选择已下载的插件整合包${NC}"
-    echo -e "${YELLOW}2. 手动输入插件库目录${NC}"
-    echo -e "${YELLOW}3. 返回${NC}"
-    read -p "> " choice
+    
+    MENU_TITLE="$M_PLUG_REPO" \
+    tui_menu "请选择操作:" \
+        "1. 选择已下载的插件整合包" \
+        "2. 手动输入插件库目录" \
+        "3. 返回"
+        
+    local choice
+    case $? in
+        0) choice="1" ;;
+        1) choice="2" ;;
+        *) return ;;
+    esac
     
     # 动态计算分页大小 (这里也要用，因为 case 1 用到了 size)
     local term_lines=$(tput lines)
@@ -1163,81 +1179,19 @@ set_plugin_repo() {
             local cur=0
             local tot=${#pkg_list[@]}
             
-            if command -v whiptail >/dev/null 2>&1; then
-        local args=()
-        for ((j=0;j<tot;j++)); do
-            # 移除颜色代码
-            local clean_name=$(echo "${pkg_list[j]}" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
-            args+=("$((j+1))" "${clean_name}")
-        done
-        
-        local h=$(tput lines)
-                local w=$(tput cols)
-                if [ $h -gt 35 ]; then h=35; fi
-                if [ $w -gt 160 ]; then w=160; fi
-                local list_h=$((h - 8))
-                if [ $list_h -lt 5 ]; then list_h=5; fi
-                
-                local choice
-                local clean_hint=$(echo "$M_SELECT_HINT" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
-                choice=$(whiptail --title "$M_PLUG_REPO" --menu "$clean_hint" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
-                
-                if [ $? -ne 0 ]; then return; fi
-                cur=$((choice-1))
-            else
-                # Fallback to pure bash TUI
-                local start=0
-                tput civis; trap 'tput cnorm' EXIT
-                
-                tui_header; echo -e "${GREEN}选择插件整合包${NC}\n$M_SELECT_HINT\n----------------------------------------"
-                
-                while true; do
-                    tui_header; echo -e "${GREEN}选择插件整合包${NC}\n$M_SELECT_HINT\n----------------------------------------"
-                    local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
-                    for ((j=start;j<end;j++)); do
-                        local clr_eol=$(tput el)
-                        local idx=$((j+1))
-                        if [ $j -eq $cur ]; then echo -e "${GREEN}-> [ ] $idx. ${pkg_list[j]}${NC}${clr_eol}"; else echo -e "   [ ] $idx. ${pkg_list[j]}${clr_eol}"; fi
-                    done
-                    for ((j=end;j<start+size;j++)); do echo "$(tput el)"; done
-                    
-                    IFS= read -rsn1 k 2>/dev/null
-                    if [[ "$k" == "" ]]; then break;
-                    elif [[ "$k" =~ [1-9] ]]; then
-                        local target=$((k-1))
-                        if [ $target -lt $tot ]; then cur=$target; break; fi
-                    elif [[ "$k" == "0" ]]; then
-                        if [ $tot -ge 10 ]; then cur=9; break; fi
-                    elif [[ "$k" == "q" || "$k" == "Q" ]]; then
-                        # Return to parent/exit (return false to loop)
-                        tput cnorm; return
-                    elif [[ "$k" == $'\x1b' ]]; then
-                         read -rsn2 -t 0.1 r
-                         case "$r" in
-                             "[A") ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi ;;
-                             "[B") ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi ;;
-                             # Numpad Application Mode (SS3)
-                             "Op") if [ $tot -ge 10 ]; then cur=9; break; fi ;; # 0
-                             "Oq") if [ $tot -ge 1 ]; then cur=0; break; fi ;; # 1
-                             "Or") if [ $tot -ge 2 ]; then cur=1; break; fi ;; # 2
-                             "Os") if [ $tot -ge 3 ]; then cur=2; break; fi ;; # 3
-                             "Ot") if [ $tot -ge 4 ]; then cur=3; break; fi ;; # 4
-                             "Ou") if [ $tot -ge 5 ]; then cur=4; break; fi ;; # 5
-                             "Ov") if [ $tot -ge 6 ]; then cur=5; break; fi ;; # 6
-                             "Ow") if [ $tot -ge 7 ]; then cur=6; break; fi ;; # 7
-                             "Ox") if [ $tot -ge 8 ]; then cur=7; break; fi ;; # 8
-                             "Oy") if [ $tot -ge 9 ]; then cur=8; break; fi ;; # 9
-                             "") tput cnorm; return ;; # ESC key
-                         esac
-                    elif [[ "$k" == "A" ]]; then ((cur--)); if [ $cur -lt 0 ]; then cur=$((tot-1)); fi; if [ $cur -lt $start ]; then start=$cur; fi
-                    elif [[ "$k" == "B" ]]; then ((cur++)); if [ $cur -ge $tot ]; then cur=0; start=0; fi; if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
-                    fi
-                    
-                    if [ $cur -lt $start ]; then start=$cur; fi
-                    if [ $cur -ge $((start+size)) ]; then start=$((cur-size+1)); fi
-                done
-                tput cnorm
-            fi
+            # 使用统一的 TUI 菜单选择
+            local menu_opts=()
+            for ((j=0;j<tot;j++)); do
+                menu_opts+=("${pkg_list[j]}")
+            done
+            
+            MENU_TITLE="$M_PLUG_REPO" \
+            tui_menu "$M_SELECT_HINT" "${menu_opts[@]}"
+            
+            local selection=$?
+            if [ $selection -eq 255 ]; then return; fi
+            
+            cur=$selection
             
             if [ $cur -lt ${#pkg_list[@]} ]; then
                 local selected_dir="$pkg_dir/${pkg_list[$cur]}/JS-MODS"
@@ -1250,15 +1204,15 @@ set_plugin_repo() {
             fi
             ;;
         2)
-            echo -e "$M_NEW_REPO_PROMPT"
-            read -e -i "$JS_MODS_DIR" new
+            local new
+            tui_input "$M_NEW_REPO_PROMPT" "$JS_MODS_DIR" "new"
             if [ -n "$new" ]; then
                 JS_MODS_DIR="$new"; echo "$new" > "$PLUGIN_CONFIG"
                 mkdir -p "$new"; echo -e "$M_SAVED"
             fi
             sleep 1
             ;;
-        3) return ;;
+        *) return ;;
     esac
 }
 
