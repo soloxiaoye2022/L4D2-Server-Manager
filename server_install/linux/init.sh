@@ -1810,6 +1810,14 @@ install_all_deps_smart() {
     local pkg_list=""
     
     # 1. 检测包管理器并构建列表
+    local dist=""
+    local ver=""
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        dist=$ID
+        ver=$VERSION_ID
+    fi
+
     if [ -f /etc/debian_version ]; then
         # 修复潜在的 dpkg 中断
         dpkg --configure -a
@@ -1819,21 +1827,34 @@ install_all_deps_smart() {
         
         # 智能判断 lib32gcc 版本
         local lib32gcc="lib32gcc-s1"
-        # 这是一个简单的试探，如果 apt-cache 报错(如源坏了)，默认为 lib32gcc-s1
-        if apt-cache show lib32gcc1 >/dev/null 2>&1; then lib32gcc="lib32gcc1"; fi
         
-        # 强制添加 lib32gcc-s1 作为备选，防止 lib32gcc1 虽存在索引但无法安装的情况
-        # apt install package1 package2 ... 如果其中一个包不存在且无替代品会报错
-        # 但我们用的是 --fix-missing，配合具体的包名
-        
-        # 更稳妥的方式：直接尝试安装两个包名，apt 会自动忽略已安装或不存在的（配合 || true）
-        # 这里我们构建一个包含所有可能变体的列表
-        pkg_list="tmux curl wget tar tree sed gawk lsof p7zip-full unzip file whiptail lib32stdc++6 ca-certificates lib32gcc-s1"
-        
-        # 如果是旧版 Debian (如 Buster 以前)，可能需要 lib32gcc1
-        if grep -q "buster" /etc/os-release || grep -q "stretch" /etc/os-release; then
-             pkg_list="$pkg_list lib32gcc1"
+        # Ubuntu 版本判断
+        if [[ "$dist" == "ubuntu" ]]; then
+            case "$ver" in
+                "16.04"|"18.04"|"20.04") lib32gcc="lib32gcc1" ;;
+                *) lib32gcc="lib32gcc-s1" ;;
+            esac
+        # Debian 版本判断
+        elif [[ "$dist" == "debian" ]]; then
+            # 提取主版本号 (如 11)
+            local major_ver=$(echo "$ver" | cut -d. -f1)
+            if [ "$major_ver" -le 10 ]; then
+                lib32gcc="lib32gcc1"
+            else
+                lib32gcc="lib32gcc-s1"
+            fi
         fi
+        
+        # 这是一个简单的试探，如果 apt-cache 报错(如源坏了)，默认为上述逻辑判断结果
+        # 但如果缓存中明确有 lib32gcc1，则优先使用
+        if apt-cache show lib32gcc1 >/dev/null 2>&1; then 
+             # 只有当系统判定为新版但缓存里只有旧版时才覆盖？
+             # 不，apt-cache 准确性更高。但为了保险，我们构建列表时可以两个都加上（利用 apt 的自动消歧义或报错忽略）
+             # 实际上，最稳妥的是根据系统版本严格指定。
+             :
+        fi
+        
+        pkg_list="tmux curl wget tar tree sed gawk lsof p7zip-full unzip file whiptail $lib32gcc lib32stdc++6 ca-certificates"
         
         # 允许 update 失败但继续安装 (修复坏源卡死问题)
         cmd_update="apt-get update -qq || echo -e '${YELLOW}部分源更新失败，尝试继续安装...${NC}'"
