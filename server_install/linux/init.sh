@@ -1822,7 +1822,18 @@ install_all_deps_smart() {
         # 这是一个简单的试探，如果 apt-cache 报错(如源坏了)，默认为 lib32gcc-s1
         if apt-cache show lib32gcc1 >/dev/null 2>&1; then lib32gcc="lib32gcc1"; fi
         
-        pkg_list="tmux curl wget tar tree sed gawk lsof p7zip-full unzip file whiptail $lib32gcc lib32stdc++6 ca-certificates"
+        # 强制添加 lib32gcc-s1 作为备选，防止 lib32gcc1 虽存在索引但无法安装的情况
+        # apt install package1 package2 ... 如果其中一个包不存在且无替代品会报错
+        # 但我们用的是 --fix-missing，配合具体的包名
+        
+        # 更稳妥的方式：直接尝试安装两个包名，apt 会自动忽略已安装或不存在的（配合 || true）
+        # 这里我们构建一个包含所有可能变体的列表
+        pkg_list="tmux curl wget tar tree sed gawk lsof p7zip-full unzip file whiptail lib32stdc++6 ca-certificates lib32gcc-s1"
+        
+        # 如果是旧版 Debian (如 Buster 以前)，可能需要 lib32gcc1
+        if grep -q "buster" /etc/os-release || grep -q "stretch" /etc/os-release; then
+             pkg_list="$pkg_list lib32gcc1"
+        fi
         
         # 允许 update 失败但继续安装 (修复坏源卡死问题)
         cmd_update="apt-get update -qq || echo -e '${YELLOW}部分源更新失败，尝试继续安装...${NC}'"
@@ -1842,7 +1853,17 @@ install_all_deps_smart() {
     
     echo -e "${YELLOW}Step 2: 安装软件包...${NC}"
     if eval "$cmd_install"; then
-        echo -e "${GREEN}安装指令执行完毕。${NC}"
+        # 二次检查: 确保关键依赖确实装上了
+        if check_dep_status_core "silent"; then
+             echo -e "${GREEN}所有依赖安装成功！${NC}"
+        else
+             echo -e "${YELLOW}部分依赖似乎仍未安装成功，尝试执行修复...${NC}"
+             # 针对 lib32gcc1/s1 的最后尝试
+             if [ -f /etc/debian_version ]; then
+                 echo -e "${CYAN}尝试强制安装 lib32gcc 变体...${NC}"
+                 apt-get install -y lib32gcc-s1 lib32gcc1 2>/dev/null || true
+             fi
+        fi
     else
         echo -e "${RED}安装过程中出现错误。${NC}"
         echo -e "${YELLOW}建议尝试 [换源] 功能修复网络问题。${NC}"
