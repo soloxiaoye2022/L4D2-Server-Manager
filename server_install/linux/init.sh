@@ -597,59 +597,6 @@ tui_menu() {
         else
             return 255
         fi
-    fi
-}
-
-    tput civis; trap 'tput cnorm' EXIT
-    while true; do
-        tui_header; echo -e "${YELLOW}$t${NC}\n----------------------------------------"
-        for ((i=0; i<tot; i++)); do
-            # 兼容处理: 移除字符串中可能存在的非 ASCII 控制字符
-            local display_opt=$(echo "${opts[i]}" | sed 's/\x1b\[[0-9;]*m//g')
-            # 同样移除手动添加的序号，统一由代码生成
-            display_opt=$(echo "$display_opt" | sed 's/^[0-9]*[.]\s*//')
-            
-            local idx=$((i+1))
-            if [ $i -eq $sel ]; then echo -e "${GREEN} -> $idx. ${display_opt} ${NC}"; else echo -e "    $idx. ${display_opt} "; fi
-        done
-        echo "----------------------------------------"
-        read -rsn1 k 2>/dev/null
-        case "$k" in
-            "") tput cnorm; return $sel ;;
-            [1-9]) 
-                local target=$((k-1))
-                if [ $target -lt $tot ]; then tput cnorm; return $target; fi
-                ;;
-            "0")
-                if [ $tot -ge 10 ]; then tput cnorm; return 9; fi
-                ;;
-            "q"|"Q")
-                 # Return 255 to indicate exit/back
-                 tput cnorm; return 255
-                 ;;
-            "A") ((sel--)); if [ $sel -lt 0 ]; then sel=$((tot-1)); fi ;;
-            "B") ((sel++)); if [ $sel -ge $tot ]; then sel=0; fi ;;
-            $'\x1b') 
-                read -rsn2 -t 0.1 r 2>/dev/null
-                case "$r" in
-                    "[A") ((sel--)); if [ $sel -lt 0 ]; then sel=$((tot-1)); fi ;;
-                    "[B") ((sel++)); if [ $sel -ge $tot ]; then sel=0; fi ;;
-                    # Handle Numpad in Application Mode (SS3 sequences)
-                    "Op") if [ $tot -ge 10 ]; then tput cnorm; return 9; fi ;; # 0
-                    "Oq") if [ $tot -ge 1 ]; then tput cnorm; return 0; fi ;; # 1
-                    "Or") if [ $tot -ge 2 ]; then tput cnorm; return 1; fi ;; # 2
-                    "Os") if [ $tot -ge 3 ]; then tput cnorm; return 2; fi ;; # 3
-                    "Ot") if [ $tot -ge 4 ]; then tput cnorm; return 3; fi ;; # 4
-                    "Ou") if [ $tot -ge 5 ]; then tput cnorm; return 4; fi ;; # 5
-                    "Ov") if [ $tot -ge 6 ]; then tput cnorm; return 5; fi ;; # 6
-                    "Ow") if [ $tot -ge 7 ]; then tput cnorm; return 6; fi ;; # 7
-                    "Ox") if [ $tot -ge 8 ]; then tput cnorm; return 7; fi ;; # 8
-                    "Oy") if [ $tot -ge 9 ]; then tput cnorm; return 8; fi ;; # 9
-                    "") tput cnorm; return 255 ;; # ESC key
-                esac
-                ;;
-        esac
-    done
 }
 
 #=============================================================================
