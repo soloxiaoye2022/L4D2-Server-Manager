@@ -1673,6 +1673,7 @@ load_i18n() {
         M_TODAY="今日:"
         M_MONTH="本月:"
         M_NO_HISTORY="暂无历史数据"
+        M_TRAFFIC_UNSUPPORTED="${YELLOW}当前系统使用 nftables 后端，暂不支持流量统计。${NC}"
         M_PRESS_KEY="${YELLOW}按任意键返回...${NC}"
         M_INIT_STEAMCMD="${YELLOW}初始化 SteamCMD...${NC}"
         M_DL_STEAMCMD="${CYAN}正在下载 SteamCMD 安装包...${NC}"
@@ -1815,6 +1816,7 @@ load_i18n() {
         M_TODAY="Today:"
         M_MONTH="Month:"
         M_NO_HISTORY="No history data"
+        M_TRAFFIC_UNSUPPORTED="${YELLOW}Traffic stats not available: nftables backend detected.${NC}"
         M_PRESS_KEY="${YELLOW}Press any key to return...${NC}"
         M_INIT_STEAMCMD="${YELLOW}Initializing SteamCMD...${NC}"
         M_DL_STEAMCMD="${CYAN}Downloading SteamCMD...${NC}"
@@ -2444,6 +2446,20 @@ traffic_daemon() {
 view_traffic() {
     local n="$1"; local port="$2"
     if [ "$EUID" -ne 0 ]; then MENU_TITLE="$M_OPT_TRAFFIC" tui_msgbox "$M_NEED_ROOT"; return; fi
+    local check_out
+    check_out=$(iptables -nvxL L4M_STATS 2>&1 || true)
+    if echo "$check_out" | grep -q "use 'nft' tool"; then
+        while true; do
+            tui_header
+            echo -e "$M_TRAFFIC_STATS $n ($port)\n----------------------------------------"
+            echo -e "$M_TRAFFIC_UNSUPPORTED"
+            echo "----------------------------------------"
+            echo -e "$M_PRESS_KEY"
+            read -n 1 -s -r k
+            if [ -n "$k" ]; then break; fi
+        done
+        return
+    fi
     while true; do
         tui_header; echo -e "$M_TRAFFIC_STATS $n ($port)\n----------------------------------------"
         local r1=$(iptables -nvxL L4M_STATS | awk -v p="dpt:$port" '$0 ~ p {sum+=$2} END {print sum+0}')
