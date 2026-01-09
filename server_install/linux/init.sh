@@ -2404,19 +2404,13 @@ edit_args() {
         if [ $choice -lt $count ]; then
             local old_name="${names[$choice]}"
             local old_cmd="${cmds[$choice]}"
-            local edit_name="$old_name"
-            local edit_cmd="$old_cmd"
-            MENU_TITLE="$M_OPT_ARGS"
-            tui_input "$M_ARGS_NAME_PROMPT" "$old_name" edit_name
-            if [ -z "$edit_name" ]; then
-                edit_name="$old_name"
-            fi
+            local edit_cmd=""
             MENU_TITLE="$M_OPT_ARGS"
             edit_launch_cmd_interactive "$old_cmd" edit_cmd
             if [ -z "$edit_cmd" ]; then
-                edit_cmd="$old_cmd"
+                continue
             fi
-            names[$choice]="$edit_name"
+            names[$choice]="$old_name"
             cmds[$choice]="$edit_cmd"
             : > "$preset_file"
             for ((i=0;i<count;i++)); do
@@ -2487,12 +2481,13 @@ edit_launch_cmd_interactive() {
             "其他参数" 7 1 "$joined_other" 7 20 40 0 \
             3>&1 1>&2 2>&3)
         local status=$?
-        if [ $status -eq 0 ]; then
-            IFS=$'\n' read -r game port ip map maxplayers tickrate joined_other <<< "$form_vals"
-            read -ra others <<< "$joined_other"
+        if [ $status -ne 0 ]; then
+            eval $__out_var=""
+            return
         fi
-    fi
-    if ! command -v whiptail >/dev/null 2>&1 || [ -z "$form_vals" ]; then
+        IFS=$'\n' read -r game port ip map maxplayers tickrate joined_other <<< "$form_vals"
+        read -ra others <<< "$joined_other"
+    else
         local tmp_other=""
         local joined="${others[*]}"
         tui_input "-game" "$game" game
