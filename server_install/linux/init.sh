@@ -2435,12 +2435,14 @@ edit_launch_cmd_interactive() {
     local maxplayers=""
     local tickrate=""
     local others=()
+
     read -ra parts <<< "$orig"
     local i=0
     if [ ${#parts[@]} -gt 0 ]; then
         exe="${parts[0]}"
         i=1
     fi
+
     while [ $i -lt ${#parts[@]} ]; do
         local t="${parts[$i]}"
         case "$t" in
@@ -2468,48 +2470,98 @@ edit_launch_cmd_interactive() {
         esac
         ((i++))
     done
-    if command -v whiptail >/dev/null 2>&1; then
-        local form_vals
+
+    while true; do
         local joined_other="${others[*]}"
-        form_vals=$(whiptail --title "$(strip_colors "$M_OPT_ARGS")" --form "配置启动参数:" 18 78 8 \
-            "-game" 1 1 "$game" 1 20 40 0 \
-            "-port" 2 1 "$port" 2 20 40 0 \
-            "-ip" 3 1 "$ip" 3 20 40 0 \
-            "+map" 4 1 "$map" 4 20 40 0 \
-            "+maxplayers" 5 1 "$maxplayers" 5 20 40 0 \
-            "-tickrate" 6 1 "$tickrate" 6 20 40 0 \
-            "其他参数" 7 1 "$joined_other" 7 20 40 0 \
-            3>&1 1>&2 2>&3)
-        local status=$?
-        if [ $status -ne 0 ]; then
+        local opts=()
+        opts+=("-game [$game]")
+        opts+=("-port [$port]")
+        opts+=("-ip [$ip]")
+        opts+=("+map [$map]")
+        opts+=("+maxplayers [$maxplayers]")
+        opts+=("-tickrate [$tickrate]")
+        opts+=("其他参数 [$joined_other]")
+        opts+=("保存并返回")
+        opts+=("取消")
+
+        MENU_TITLE="$M_OPT_ARGS"
+        tui_menu "请选择要编辑的启动参数:\n左侧为启动项，右侧为当前值。" "${opts[@]}"
+        local choice=$?
+        local total=${#opts[@]}
+
+        if [ $choice -eq 255 ] || [ $choice -ge $total ]; then
             eval $__out_var=""
             return
         fi
-        IFS=$'\n' read -r game port ip map maxplayers tickrate joined_other <<< "$form_vals"
-        read -ra others <<< "$joined_other"
-    else
-        local tmp_other=""
-        local joined="${others[*]}"
-        tui_input "-game" "$game" game
-        tui_input "-port" "$port" port
-        tui_input "-ip" "$ip" ip
-        tui_input "+map" "$map" map
-        tui_input "+maxplayers" "$maxplayers" maxplayers
-        tui_input "-tickrate" "$tickrate" tickrate
-        tui_input "其他参数 (保持原样附加在最后)" "$joined" tmp_other
-        read -ra others <<< "$tmp_other"
-    fi
-    local new_cmd="$exe"
-    if [ -n "$game" ]; then new_cmd="$new_cmd -game $game"; fi
-    if [ -n "$port" ]; then new_cmd="$new_cmd -port $port"; fi
-    if [ -n "$ip" ]; then new_cmd="$new_cmd -ip $ip"; fi
-    if [ -n "$map" ]; then new_cmd="$new_cmd +map $map"; fi
-    if [ -n "$maxplayers" ]; then new_cmd="$new_cmd +maxplayers $maxplayers"; fi
-    if [ -n "$tickrate" ]; then new_cmd="$new_cmd -tickrate $tickrate"; fi
-    if [ ${#others[@]} -gt 0 ]; then
-        new_cmd="$new_cmd ${others[*]}"
-    fi
-    eval $__out_var=\"\$new_cmd\"
+
+        case $choice in
+            0)
+                local new_game=""
+                if tui_input "-game 当前值:" "$game" new_game; then
+                    game="$new_game"
+                fi
+                ;;
+            1)
+                local new_port=""
+                if tui_input "-port 当前值:" "$port" new_port; then
+                    port="$new_port"
+                fi
+                ;;
+            2)
+                local new_ip=""
+                if tui_input "-ip 当前值:" "$ip" new_ip; then
+                    ip="$new_ip"
+                fi
+                ;;
+            3)
+                local new_map=""
+                if tui_input "+map 当前值:" "$map" new_map; then
+                    map="$new_map"
+                fi
+                ;;
+            4)
+                local new_maxplayers=""
+                if tui_input "+maxplayers 当前值:" "$maxplayers" new_maxplayers; then
+                    maxplayers="$new_maxplayers"
+                fi
+                ;;
+            5)
+                local new_tickrate=""
+                if tui_input "-tickrate 当前值:" "$tickrate" new_tickrate; then
+                    tickrate="$new_tickrate"
+                fi
+                ;;
+            6)
+                local new_other=""
+                if tui_input "其他参数 (空格分隔，保持原样附加在最后):" "$joined_other" new_other; then
+                    joined_other="$new_other"
+                    if [ -n "$joined_other" ]; then
+                        read -ra others <<< "$joined_other"
+                    else
+                        others=()
+                    fi
+                fi
+                ;;
+            7)
+                local new_cmd="$exe"
+                if [ -n "$game" ]; then new_cmd="$new_cmd -game $game"; fi
+                if [ -n "$port" ]; then new_cmd="$new_cmd -port $port"; fi
+                if [ -n "$ip" ]; then new_cmd="$new_cmd -ip $ip"; fi
+                if [ -n "$map" ]; then new_cmd="$new_cmd +map $map"; fi
+                if [ -n "$maxplayers" ]; then new_cmd="$new_cmd +maxplayers $maxplayers"; fi
+                if [ -n "$tickrate" ]; then new_cmd="$new_cmd -tickrate $tickrate"; fi
+                if [ ${#others[@]} -gt 0 ]; then
+                    new_cmd="$new_cmd ${others[*]}"
+                fi
+                eval $__out_var=\"\$new_cmd\"
+                return
+                ;;
+            8)
+                eval $__out_var=""
+                return
+                ;;
+        esac
+    done
 }
 
 toggle_auto() {
