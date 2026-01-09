@@ -47,7 +47,7 @@ l4m install  # Re-run the installation wizard (Repair)
 
 2.  **Server Management**:
     - **Start/Stop/Restart**: One-click control with real-time status.
-    - **Link Manager**: Unique feature. Toggle specific dirs (`maps`, `materials`, `dlc`) between "Symlink" (Shared) and "Copy" (Standalone). Significantly reduces disk usage by sharing official assets or customize freely.
+    - **Link Manager**: Unique feature. Toggle specific dirs (`maps` (official maps), `materials`, `dlc`) between "Symlink" (Shared) and "Copy" (Standalone), allowing all instances to share official assets to save disk space while still keeping plugins and maps fully independent per instance.
     - **Centralized Update**: Updates the core server cache once, and all "Linked" instances are updated instantly.
     - **Traffic Stats**: View real-time bandwidth usage.
     - **Console**: Access server console (tmux). Press `Ctrl+B` then `D` to detach.
