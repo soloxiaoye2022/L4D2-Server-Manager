@@ -2519,76 +2519,65 @@ edit_launch_cmd_interactive() {
 
     while true; do
         local joined_other="${others[*]}"
-        local opts=()
-        opts+=("-game [$game]")
-        opts+=("-port [$port]")
-        opts+=("-ip [$ip]")
-        opts+=(["+map [$map]"])
-        opts+=(["+maxplayers [$maxplayers]"])
-        opts+=("-tickrate [$tickrate]")
-        opts+=("其他参数 [$joined_other]")
-        opts+=("保存并返回")
-        opts+=("取消")
-
-        MENU_TITLE="$M_OPT_ARGS"
-        tui_menu "请选择要编辑的启动参数:\n左侧为启动项，右侧为当前值。" "${opts[@]}"
-        local choice=$?
-        local total=${#opts[@]}
-
-        if [ $choice -eq 255 ] || [ $choice -ge $total ]; then
-            eval $__out_var=""
-            return
-        fi
-
-        case $choice in
-            0)
-                local new_game=""
-                if tui_input "-game 当前值:" "$game" new_game; then
-                    game="$new_game"
-                fi
-                ;;
+        clear
+        echo -e "${CYAN}当前启动指令:${NC}"
+        local preview="$exe"
+        if [ -n "$game" ]; then preview="$preview -game $game"; fi
+        if [ -n "$port" ]; then preview="$preview -port $port"; fi
+        if [ -n "$ip" ]; then preview="$preview -ip $ip"; fi
+        if [ -n "$map" ]; then preview="$preview +map $map"; fi
+        if [ -n "$maxplayers" ]; then preview="$preview +maxplayers $maxplayers"; fi
+        if [ -n "$tickrate" ]; then preview="$preview -tickrate $tickrate"; fi
+        if [ ${#others[@]} -gt 0 ]; then preview="$preview ${others[*]}"; fi
+        echo -e "  $preview"
+        echo ""
+        echo -e "${YELLOW}请选择要编辑的启动参数:${NC}"
+        echo "1) -game        [$game]"
+        echo "2) -port        [$port]"
+        echo "3) -ip          [$ip]"
+        echo "4) +map         [$map]"
+        echo "5) +maxplayers  [$maxplayers]"
+        echo "6) -tickrate    [$tickrate]"
+        echo "7) 其他参数     [$joined_other]"
+        echo "8) 保存并返回"
+        echo "9) 取消"
+        echo ""
+        read -p "请输入编号 [1-9]: " choice
+        case "$choice" in
             1)
-                local new_port=""
-                if tui_input "-port 当前值:" "$port" new_port; then
-                    port="$new_port"
-                fi
+                read -p "-game 当前值($game): " input
+                if [ -n "$input" ]; then game="$input"; fi
                 ;;
             2)
-                local new_ip=""
-                if tui_input "-ip 当前值:" "$ip" new_ip; then
-                    ip="$new_ip"
-                fi
+                read -p "-port 当前值($port): " input
+                if [ -n "$input" ]; then port="$input"; fi
                 ;;
             3)
-                local new_map=""
-                if tui_input "+map 当前值:" "$map" new_map; then
-                    map="$new_map"
-                fi
+                read -p "-ip 当前值($ip): " input
+                if [ -n "$input" ]; then ip="$input"; fi
                 ;;
             4)
-                local new_maxplayers=""
-                if tui_input "+maxplayers 当前值:" "$maxplayers" new_maxplayers; then
-                    maxplayers="$new_maxplayers"
-                fi
+                read -p "+map 当前值($map): " input
+                if [ -n "$input" ]; then map="$input"; fi
                 ;;
             5)
-                local new_tickrate=""
-                if tui_input "-tickrate 当前值:" "$tickrate" new_tickrate; then
-                    tickrate="$new_tickrate"
-                fi
+                read -p "+maxplayers 当前值($maxplayers): " input
+                if [ -n "$input" ]; then maxplayers="$input"; fi
                 ;;
             6)
-                local new_other=""
-                if tui_input "其他参数 (空格分隔，保持原样附加在最后):" "$joined_other" new_other; then
-                    joined_other="$new_other"
-                    if [ -n "$joined_other" ]; then
-                        read -ra others <<< "$joined_other"
-                    else
-                        others=()
-                    fi
-                fi
+                read -p "-tickrate 当前值($tickrate): " input
+                if [ -n "$input" ]; then tickrate="$input"; fi
                 ;;
             7)
+                read -p "其他参数 (空格分隔，保持原样附加在最后): " input
+                joined_other="$input"
+                if [ -n "$joined_other" ]; then
+                    read -ra others <<< "$joined_other"
+                else
+                    others=()
+                fi
+                ;;
+            8)
                 local new_cmd="$exe"
                 if [ -n "$game" ]; then new_cmd="$new_cmd -game $game"; fi
                 if [ -n "$port" ]; then new_cmd="$new_cmd -port $port"; fi
@@ -2602,9 +2591,11 @@ edit_launch_cmd_interactive() {
                 eval $__out_var=\"\$new_cmd\"
                 return
                 ;;
-            8)
+            9)
                 eval $__out_var=""
                 return
+                ;;
+            *)
                 ;;
         esac
     done
