@@ -1787,6 +1787,9 @@ load_i18n() {
         M_VER_REMOTE_UP_TO_DATE="${GREEN}(已是最新)${NC}"
         M_VER_REMOTE_NEED_UPDATE="${YELLOW}(有新版本，建议执行“系统更新”)${NC}"
         M_VER_REMOTE_UNKNOWN="${GREY}远程版本未知 (请先执行一次“系统更新”)${NC}"
+        M_VER_TAG_UP_TO_DATE="[最新]"
+        M_VER_TAG_NEED_UPDATE="[有更新]"
+        M_VER_TAG_UNKNOWN="[远程未知]"
     else
         M_TITLE="=== L4D2 Manager (L4M) ==="
         M_WELCOME="Welcome to L4D2 Server Manager (L4M)"
@@ -1934,6 +1937,9 @@ load_i18n() {
         M_VER_REMOTE_UP_TO_DATE="${GREEN}(up to date)${NC}"
         M_VER_REMOTE_NEED_UPDATE="${YELLOW}(new version available, run \"Update System\")${NC}"
         M_VER_REMOTE_UNKNOWN="${GREY}Remote version unknown (run \"Update System\" once)${NC}"
+        M_VER_TAG_UP_TO_DATE="[Up-to-date]"
+        M_VER_TAG_NEED_UPDATE="[Update Available]"
+        M_VER_TAG_UNKNOWN="[Remote Unknown]"
     fi
 }
 
@@ -3177,9 +3183,6 @@ main() {
     fi
     # 使用双引号包裹 cat 输出，防止参数传递错误
     if [ -f "$CONFIG_FILE" ]; then load_i18n "$(cat "$CONFIG_FILE")"; else load_i18n "en"; fi
-    if [[ "$CONFIG_FILE" == *"config.dat" ]]; then
-        M_TITLE="=== L4D2 管理器 (L4M) v${L4M_VERSION} ==="
-    fi
     
     if [[ "$INSTALL_TYPE" == "temp" ]]; then
         local exist_path=""
@@ -3209,15 +3212,20 @@ main() {
         fi
         local main_desc=""
         local ver_line="${M_VER_LOCAL} v${L4M_VERSION}"
+        local title_tag=""
         if [ -n "$remote_ver_cached" ]; then
             if [ "$remote_ver_cached" = "$L4M_VERSION" ]; then
                 main_desc="$M_MAIN_MENU\n$ver_line\n${M_VER_REMOTE} v${remote_ver_cached} ${M_VER_REMOTE_UP_TO_DATE}"
+                title_tag="$M_VER_TAG_UP_TO_DATE"
             else
                 main_desc="$M_MAIN_MENU\n$ver_line\n${M_VER_REMOTE} v${remote_ver_cached} ${M_VER_REMOTE_NEED_UPDATE}"
+                title_tag="$M_VER_TAG_NEED_UPDATE"
             fi
         else
             main_desc="$M_MAIN_MENU\n$ver_line\n$M_VER_REMOTE_UNKNOWN"
+            title_tag="$M_VER_TAG_UNKNOWN"
         fi
+        MENU_TITLE="L4D2 Manager (L4M) v${L4M_VERSION} ${title_tag}"
         tui_menu "$main_desc" "$M_DEPLOY" "$M_MANAGE" "$M_DOWNLOAD_PACKAGES" "$M_DEPS" "$M_UPDATE" "$M_LANG" "$M_UNINSTALL_MENU" "$M_EXIT"
         case $? in
             0) deploy_wizard ;; 1) manage_menu ;; 2) download_packages ;; 3) dep_manager_menu ;; 4) self_update ;; 5) change_lang ;; 6) uninstall_menu ;; 7|255) exit 0 ;;
