@@ -1205,8 +1205,10 @@ auto_select_repo() {
 }
 
 manage_plugins() {
-    local t="$1/left4dead2"
-    local rec_dir="$1/.plugin_records"
+    local inst_name="$1"
+    local base_path="$2"
+    local t="$base_path/left4dead2"
+    local rec_dir="$base_path/.plugin_records"
     
     # --- 插件库配置检查逻辑 (Refactored) ---
     
@@ -1330,11 +1332,15 @@ manage_plugins() {
     # 3. Show Checklist
     if command -v whiptail >/dev/null 2>&1; then
         local args=()
+        local pre_selected=0
         for ((i=0; i<tot; i++)); do
              # Strip colors for whiptail
              local clean_name=$(echo "${available_plugins[i]}" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
              local status="OFF"
-             if [ "${installed_status[i]}" -eq 1 ]; then status="ON"; fi
+             if [ "${installed_status[i]}" -eq 1 ]; then
+                 status="ON"
+                 pre_selected=$((pre_selected+1))
+             fi
              args+=("$i" "$clean_name" "$status")
         done
         
@@ -1344,8 +1350,16 @@ manage_plugins() {
         if [ $w -gt 160 ]; then w=160; fi
         local list_h=$((h - 8))
         if [ $list_h -lt 5 ]; then list_h=5; fi
-        
-        local clean_hint=$(echo "$M_SELECT_HINT" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
+
+        local inst_info=""
+        if [ -n "$inst_name" ]; then
+            inst_info="$M_INSTANCE_NAME_LABEL $inst_name\n$M_INSTANCE_DIR_LABEL $base_path\n"
+        fi
+        local count_text
+        count_text=$(printf "$M_SELECTED_COUNT_LABEL" "$pre_selected" "$tot")
+        local raw_hint="${inst_info}${count_text}\n$M_SELECT_HINT"
+        local clean_hint
+        clean_hint=$(printf "%b" "$raw_hint" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
         # Use index as tag to avoid issues with spaces/special chars in names
         choices=$(whiptail --title "$M_PLUG_MANAGE" --checklist "$clean_hint" $h $w $list_h "${args[@]}" 3>&1 1>&2 2>&3)
         
@@ -1369,7 +1383,18 @@ manage_plugins() {
         tput civis; trap 'tput cnorm' EXIT
         
         while true; do
-            tui_header; echo -e "$M_PLUG_MANAGE\n$M_SELECT_HINT\n----------------------------------------"
+            tui_header
+            local inst_info=""
+            if [ -n "$inst_name" ]; then
+                inst_info="$M_INSTANCE_NAME_LABEL $inst_name\n$M_INSTANCE_DIR_LABEL $base_path\n"
+            fi
+            local pre_selected_cli=0
+            for ((j=0;j<tot;j++)); do
+                if [ "${sel[j]}" -eq 1 ]; then pre_selected_cli=$((pre_selected_cli+1)); fi
+            done
+            local count_text_cli
+            count_text_cli=$(printf "$M_SELECTED_COUNT_LABEL" "$pre_selected_cli" "$tot")
+            echo -e "$M_PLUG_MANAGE\n$inst_info$count_text_cli\n$M_SELECT_HINT\n----------------------------------------"
             local end=$((start+size)); if [ $end -gt $tot ]; then end=$tot; fi
             for ((j=start;j<end;j++)); do
                 local m="[ ]"; if [ "${sel[j]}" -eq 1 ]; then m="[x]"; fi
@@ -1463,7 +1488,8 @@ manage_plugins() {
 
 
 plugins_menu() {
-    local p="$1"
+    local n="$1"
+    local p="$2"
     # 修复：只检查基础目录，不强制要求 left4dead2 子目录存在 (可能尚未首次运行生成)
     if [ ! -d "$p" ]; then 
         MENU_TITLE="$M_OPT_PLUGINS" tui_msgbox "${RED}目录错: 找不到路径 '$p'${NC}\n\n${YELLOW}可能原因: 实例路径被移动或包含特殊字符。${NC}"
@@ -1476,7 +1502,7 @@ plugins_menu() {
     while true; do
         tui_menu "$M_OPT_PLUGINS" "$M_PLUG_MANAGE" "$M_PLUG_PLAT" "$M_PLUG_REPO" "$M_RETURN"
         case $? in
-            0) manage_plugins "$p" ;; 
+            0) manage_plugins "$n" "$p" ;; 
             1) inst_plat "$p" ;; 
             2) set_plugin_repo ;; 
             3|255) return ;;
@@ -1711,7 +1737,10 @@ load_i18n() {
         M_REPO_NOT_FOUND="${RED}插件库不存在:${NC}"
         M_REPO_EMPTY="插件库为空"
         M_INSTALLED="${GREY}[已装]${NC}"
-        M_SELECT_HINT="${YELLOW}Space:Select Enter:Confirm${NC}"
+        M_INSTANCE_NAME_LABEL="${CYAN}当前实例:${NC}"
+        M_INSTANCE_DIR_LABEL="${CYAN}实例目录:${NC}"
+        M_SELECTED_COUNT_LABEL="${YELLOW}当前选中插件: %d / %d 个${NC}"
+        M_SELECT_HINT="${YELLOW}操作提示: 空格=选择/取消  回车=确认  ↑↓=上下移动  鼠标滚轮=滚动列表${NC}"
         M_DONE="${GREEN}完成${NC}"
         M_LOCAL_PKG="${CYAN}发现本地预置包，正在安装...${NC}"
         M_CONN_OFFICIAL="${CYAN}正在连接官网(sourcemod.net)获取最新版本...${NC}"
@@ -1850,7 +1879,10 @@ load_i18n() {
         M_REPO_NOT_FOUND="${RED}Repo not found:${NC}"
         M_REPO_EMPTY="Repo empty"
         M_INSTALLED="${GREY}[Installed]${NC}"
-        M_SELECT_HINT="${YELLOW}Space:Select Enter:Confirm${NC}"
+        M_INSTANCE_NAME_LABEL="${CYAN}Instance:${NC}"
+        M_INSTANCE_DIR_LABEL="${CYAN}Instance Path:${NC}"
+        M_SELECTED_COUNT_LABEL="${YELLOW}Selected plugins: %d / %d${NC}"
+        M_SELECT_HINT="${YELLOW}Controls: Space=Select/Unselect  Enter=Confirm  ↑/↓=Move  MouseWheel=Scroll list${NC}"
         M_DONE="${GREEN}Done${NC}"
         M_LOCAL_PKG="${CYAN}Found local package, installing...${NC}"
         M_CONN_OFFICIAL="${CYAN}Connecting to official site...${NC}"
@@ -1948,7 +1980,7 @@ control_panel() {
             5) view_log "$p" ;;
             6) view_traffic "$n" "$port" ;;
             7) edit_args "$p" ;;
-            8) plugins_menu "$p" ;;
+            8) plugins_menu "$n" "$p" ;;
             9) manage_links_menu "$n" "$p" ;;
             10) toggle_auto "$n" "$line"; break ;; 
             11) backup_srv "$n" "$p" ;;
