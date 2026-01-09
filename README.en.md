@@ -9,9 +9,10 @@ Designed for Linux environments, supporting all platforms (VPS, Dedicated Server
 *   **🚀 One-Click Install & Persistence**: Automatically installs to system. Default path unified to `~/L4D2_Servers` for easier management.
 *   **💻 Powerful CLI Tool**: Manage everything using `l4m` command. Supports self-update (`l4m update`).
 *   **🖥️ Modern TUI**: Full graphical menu with real-time traffic monitoring and progress bars for downloads.
-*   **📦 Multi-Instance**: Hybrid deployment. Copies core binaries (`bin`, `hl2`) for stability, while symlinking assets (`maps`, `materials`) to save space.
+*   **📦 Multi-Instance**: Hybrid deployment. Copies core binaries (`bin`, `hl2`) for stability, while symlinking assets (`maps`, `materials`) to save space. Features **Link Manager** to toggle between "Shared" and "Standalone" modes.
 *   **🔌 Smart Plugin Manager**: 
     *   **Global Repo**: Shared `~/L4D2_Plugins` directory saves space.
+    *   **Smart Detection**: Auto-flattens nested plugin packages and detects `JS-MODS` structure.
     *   **Install Tracking**: Tracks installed plugins to avoid duplicates.
     *   **One-Click Platform**: Installs SourceMod/MetaMod (prefers local package if available).
 *   **🛡️ Watchdog & Auto-Start**: Auto-restarts crashed servers; supports boot auto-start (Systemd/Crontab).
@@ -46,7 +47,8 @@ l4m install  # Re-run the installation wizard (Repair)
 
 2.  **Server Management**:
     - **Start/Stop/Restart**: One-click control with real-time status.
-    - **Update Server**: Supports resume and auto-fix for update scripts.
+    - **Link Manager**: Unique feature. Toggle specific dirs (`maps`, `materials`, `dlc`) between "Symlink" (Shared) and "Copy" (Standalone). Save 50GB+ space or customize freely.
+    - **Centralized Update**: Updates the core server cache once, and all "Linked" instances are updated instantly.
     - **Traffic Stats**: View real-time bandwidth usage.
     - **Console**: Access server console (tmux). Press `Ctrl+B` then `D` to detach.
 
