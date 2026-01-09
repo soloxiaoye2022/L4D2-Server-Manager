@@ -2479,21 +2479,22 @@ edit_launch_cmd_interactive() {
             "+maxplayers" 5 1 "$maxplayers" 5 20 40 0 \
             "-tickrate" 6 1 "$tickrate" 6 20 40 0 \
             "其他参数" 7 1 "$joined_other" 7 20 40 0 \
-            3>&1 1>&2 2>&3) || {
-                eval $__out_var=\"\$orig\"
-                return
-            }
-        IFS=$'\n' read -r game port ip map maxplayers tickrate joined_other <<< "$form_vals"
-        read -ra others <<< "$joined_other"
-    else
+            3>&1 1>&2 2>&3)
+        local status=$?
+        if [ $status -eq 0 ]; then
+            IFS=$'\n' read -r game port ip map maxplayers tickrate joined_other <<< "$form_vals"
+            read -ra others <<< "$joined_other"
+        fi
+    fi
+    if ! command -v whiptail >/dev/null 2>&1 || [ -z "$form_vals" ]; then
+        local tmp_other=""
+        local joined="${others[*]}"
         tui_input "-game" "$game" game
         tui_input "-port" "$port" port
         tui_input "-ip" "$ip" ip
         tui_input "+map" "$map" map
         tui_input "+maxplayers" "$maxplayers" maxplayers
         tui_input "-tickrate" "$tickrate" tickrate
-        local tmp_other=""
-        local joined="${others[*]}"
         tui_input "其他参数 (保持原样附加在最后)" "$joined" tmp_other
         read -ra others <<< "$tmp_other"
     fi
