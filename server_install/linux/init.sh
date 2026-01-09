@@ -2385,7 +2385,7 @@ edit_args() {
                 continue
             fi
             MENU_TITLE="$M_OPT_ARGS"
-            tui_input "$M_NEW_CMD" "$current_line" new_cmd
+            edit_launch_cmd_interactive "$current_line" new_cmd
             if [ -z "$new_cmd" ]; then
                 continue
             fi
@@ -2407,7 +2407,7 @@ edit_args() {
                 edit_name="$old_name"
             fi
             MENU_TITLE="$M_OPT_ARGS"
-            tui_input "$M_NEW_CMD" "$old_cmd" edit_cmd
+            edit_launch_cmd_interactive "$old_cmd" edit_cmd
             if [ -z "$edit_cmd" ]; then
                 edit_cmd="$old_cmd"
             fi
@@ -2423,6 +2423,92 @@ edit_args() {
             MENU_TITLE="$M_OPT_ARGS" tui_msgbox "$M_SAVED"
         fi
     done
+}
+
+edit_launch_cmd_interactive() {
+    local orig="$1"
+    local __out_var="$2"
+    local exe="./srcds_run"
+    local game=""
+    local port=""
+    local ip=""
+    local map=""
+    local maxplayers=""
+    local tickrate=""
+    local others=()
+    read -ra parts <<< "$orig"
+    local i=0
+    if [ ${#parts[@]} -gt 0 ]; then
+        exe="${parts[0]}"
+        i=1
+    fi
+    while [ $i -lt ${#parts[@]} ]; do
+        local t="${parts[$i]}"
+        case "$t" in
+            -game)
+                ((i++)); game="${parts[$i]:-$game}"
+                ;;
+            -port)
+                ((i++)); port="${parts[$i]:-$port}"
+                ;;
+            -ip)
+                ((i++)); ip="${parts[$i]:-$ip}"
+                ;;
+            +map)
+                ((i++)); map="${parts[$i]:-$map}"
+                ;;
+            +maxplayers)
+                ((i++)); maxplayers="${parts[$i]:-$maxplayers}"
+                ;;
+            -tickrate)
+                ((i++)); tickrate="${parts[$i]:-$tickrate}"
+                ;;
+            *)
+                others+=("$t")
+                ;;
+        esac
+        ((i++))
+    done
+    if command -v whiptail >/dev/null 2>&1; then
+        local form_vals
+        local joined_other="${others[*]}"
+        form_vals=$(whiptail --title "$(strip_colors "$M_OPT_ARGS")" --form "配置启动参数:" 18 78 8 \
+            "-game" 1 1 "$game" 1 20 40 0 \
+            "-port" 2 1 "$port" 2 20 40 0 \
+            "-ip" 3 1 "$ip" 3 20 40 0 \
+            "+map" 4 1 "$map" 4 20 40 0 \
+            "+maxplayers" 5 1 "$maxplayers" 5 20 40 0 \
+            "-tickrate" 6 1 "$tickrate" 6 20 40 0 \
+            "其他参数" 7 1 "$joined_other" 7 20 40 0 \
+            3>&1 1>&2 2>&3) || {
+                eval $__out_var=\"\$orig\"
+                return
+            }
+        IFS=$'\n' read -r game port ip map maxplayers tickrate joined_other <<< "$form_vals"
+        read -ra others <<< "$joined_other"
+    else
+        tui_input "-game" "$game" game
+        tui_input "-port" "$port" port
+        tui_input "-ip" "$ip" ip
+        tui_input "+map" "$map" map
+        tui_input "+maxplayers" "$maxplayers" maxplayers
+        tui_input "-tickrate" "$tickrate" tickrate
+        local tmp_other=""
+        local joined="${others[*]}"
+        tui_input "其他参数 (保持原样附加在最后)" "$joined" tmp_other
+        read -ra others <<< "$tmp_other"
+    fi
+    local new_cmd="$exe"
+    if [ -n "$game" ]; then new_cmd="$new_cmd -game $game"; fi
+    if [ -n "$port" ]; then new_cmd="$new_cmd -port $port"; fi
+    if [ -n "$ip" ]; then new_cmd="$new_cmd -ip $ip"; fi
+    if [ -n "$map" ]; then new_cmd="$new_cmd +map $map"; fi
+    if [ -n "$maxplayers" ]; then new_cmd="$new_cmd +maxplayers $maxplayers"; fi
+    if [ -n "$tickrate" ]; then new_cmd="$new_cmd -tickrate $tickrate"; fi
+    if [ ${#others[@]} -gt 0 ]; then
+        new_cmd="$new_cmd ${others[*]}"
+    fi
+    eval $__out_var=\"\$new_cmd\"
 }
 
 toggle_auto() {
