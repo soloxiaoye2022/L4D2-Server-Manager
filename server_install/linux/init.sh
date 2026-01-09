@@ -750,6 +750,49 @@ self_update() {
     fi
 }
 
+refresh_remote_version_cache_quiet() {
+    local tmp="/tmp/l4m_ver.sh"
+    rm -f "$tmp"
+    local url="https://raw.githubusercontent.com/soloxiaoye2022/server_install/main/server_install/linux/init.sh"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL -m 15 "$url" -o "$tmp" || return
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -T 15 -O "$tmp" "$url" || return
+    else
+        return
+    fi
+    local fsize
+    fsize=$(wc -c < "$tmp" 2>/dev/null || echo 0)
+    if grep -q 'L4M_VERSION=' "$tmp" && [ "$fsize" -gt 10240 ]; then
+        local remote_ver
+        remote_ver=$(grep 'L4M_VERSION=' "$tmp" | head -n1 | cut -d'=' -f2 | tr -d '"')
+        echo "$remote_ver" > "$REMOTE_VERSION_CACHE"
+    fi
+    rm -f "$tmp"
+}
+
+ensure_remote_version_cached() {
+    local need_refresh=0
+    if [ ! -f "$REMOTE_VERSION_CACHE" ]; then
+        need_refresh=1
+    else
+        if command -v stat >/dev/null 2>&1 && command -v date >/dev/null 2>&1; then
+            local mtime
+            local now
+            mtime=$(stat -c %Y "$REMOTE_VERSION_CACHE" 2>/dev/null || echo 0)
+            now=$(date +%s 2>/dev/null || echo 0)
+            if [ "$mtime" -eq 0 ] || [ "$now" -eq 0 ]; then
+                need_refresh=1
+            elif [ $((now - mtime)) -gt 43200 ]; then
+                need_refresh=1
+            fi
+        fi
+    fi
+    if [ "$need_refresh" -eq 1 ]; then
+        refresh_remote_version_cache_quiet
+    fi
+}
+
 install_steamcmd() {
     # 修复 SteamCMD Locale (Debian/Ubuntu Root)
     if [ "$EUID" -eq 0 ] && [ -f /etc/debian_version ] && ! locale -a 2>/dev/null | grep -q "en_US.utf8"; then
@@ -2474,127 +2517,97 @@ edit_launch_cmd_interactive() {
         ((i++))
     done
 
-    if command -v whiptail >/dev/null 2>&1; then
-        while true; do
-            local joined_other="${others[*]}"
-            local choice
-            choice=$(whiptail --title "$(strip_colors "$M_OPT_ARGS")" --menu "请选择要编辑的启动参数:\n左侧为启动项，右侧为当前值。" 20 72 10 \
-                "game" "-game [$game]" \
-                "port" "-port [$port]" \
-                "ip" "-ip [$ip]" \
-                "map" "+map [$map]" \
-                "maxplayers" "+maxplayers [$maxplayers]" \
-                "tickrate" "-tickrate [$tickrate]" \
-                "other" "其他参数 [$joined_other]" \
-                "save" "保存并返回" \
-                "cancel" "取消" \
-                3>&1 1>&2 2>&3)
-            if [ $? -ne 0 ]; then
+    while true; do
+        local joined_other="${others[*]}"
+        local opts=()
+        opts+=("-game [$game]")
+        opts+=("-port [$port]")
+        opts+=("-ip [$ip]")
+        opts+=(["+map [$map]"])
+        opts+=(["+maxplayers [$maxplayers]"])
+        opts+=("-tickrate [$tickrate]")
+        opts+=("其他参数 [$joined_other]")
+        opts+=("保存并返回")
+        opts+=("取消")
+
+        MENU_TITLE="$M_OPT_ARGS"
+        tui_menu "请选择要编辑的启动参数:\n左侧为启动项，右侧为当前值。" "${opts[@]}"
+        local choice=$?
+        local total=${#opts[@]}
+
+        if [ $choice -eq 255 ] || [ $choice -ge $total ]; then
+            eval $__out_var=""
+            return
+        fi
+
+        case $choice in
+            0)
+                local new_game=""
+                if tui_input "-game 当前值:" "$game" new_game; then
+                    game="$new_game"
+                fi
+                ;;
+            1)
+                local new_port=""
+                if tui_input "-port 当前值:" "$port" new_port; then
+                    port="$new_port"
+                fi
+                ;;
+            2)
+                local new_ip=""
+                if tui_input "-ip 当前值:" "$ip" new_ip; then
+                    ip="$new_ip"
+                fi
+                ;;
+            3)
+                local new_map=""
+                if tui_input "+map 当前值:" "$map" new_map; then
+                    map="$new_map"
+                fi
+                ;;
+            4)
+                local new_maxplayers=""
+                if tui_input "+maxplayers 当前值:" "$maxplayers" new_maxplayers; then
+                    maxplayers="$new_maxplayers"
+                fi
+                ;;
+            5)
+                local new_tickrate=""
+                if tui_input "-tickrate 当前值:" "$tickrate" new_tickrate; then
+                    tickrate="$new_tickrate"
+                fi
+                ;;
+            6)
+                local new_other=""
+                if tui_input "其他参数 (空格分隔，保持原样附加在最后):" "$joined_other" new_other; then
+                    joined_other="$new_other"
+                    if [ -n "$joined_other" ]; then
+                        read -ra others <<< "$joined_other"
+                    else
+                        others=()
+                    fi
+                fi
+                ;;
+            7)
+                local new_cmd="$exe"
+                if [ -n "$game" ]; then new_cmd="$new_cmd -game $game"; fi
+                if [ -n "$port" ]; then new_cmd="$new_cmd -port $port"; fi
+                if [ -n "$ip" ]; then new_cmd="$new_cmd -ip $ip"; fi
+                if [ -n "$map" ]; then new_cmd="$new_cmd +map $map"; fi
+                if [ -n "$maxplayers" ]; then new_cmd="$new_cmd +maxplayers $maxplayers"; fi
+                if [ -n "$tickrate" ]; then new_cmd="$new_cmd -tickrate $tickrate"; fi
+                if [ ${#others[@]} -gt 0 ]; then
+                    new_cmd="$new_cmd ${others[*]}"
+                fi
+                eval $__out_var=\"\$new_cmd\"
+                return
+                ;;
+            8)
                 eval $__out_var=""
                 return
-            fi
-            case "$choice" in
-                game)
-                    local new_game
-                    new_game=$(whiptail --title "$(strip_colors "$M_OPT_ARGS")" --inputbox "-game 当前值:" 10 60 "$game" 3>&1 1>&2 2>&3)
-                    if [ $? -eq 0 ]; then
-                        game="$new_game"
-                    fi
-                    ;;
-                port)
-                    local new_port
-                    new_port=$(whiptail --title "$(strip_colors "$M_OPT_ARGS")" --inputbox "-port 当前值:" 10 60 "$port" 3>&1 1>&2 2>&3)
-                    if [ $? -eq 0 ]; then
-                        port="$new_port"
-                    fi
-                    ;;
-                ip)
-                    local new_ip
-                    new_ip=$(whiptail --title "$(strip_colors "$M_OPT_ARGS")" --inputbox "-ip 当前值:" 10 60 "$ip" 3>&1 1>&2 2>&3)
-                    if [ $? -eq 0 ]; then
-                        ip="$new_ip"
-                    fi
-                    ;;
-                map)
-                    local new_map
-                    new_map=$(whiptail --title "$(strip_colors "$M_OPT_ARGS")" --inputbox "+map 当前值:" 10 60 "$map" 3>&1 1>&2 2>&3)
-                    if [ $? -eq 0 ]; then
-                        map="$new_map"
-                    fi
-                    ;;
-                maxplayers)
-                    local new_maxplayers
-                    new_maxplayers=$(whiptail --title "$(strip_colors "$M_OPT_ARGS")" --inputbox "+maxplayers 当前值:" 10 60 "$maxplayers" 3>&1 1>&2 2>&3)
-                    if [ $? -eq 0 ]; then
-                        maxplayers="$new_maxplayers"
-                    fi
-                    ;;
-                tickrate)
-                    local new_tickrate
-                    new_tickrate=$(whiptail --title "$(strip_colors "$M_OPT_ARGS")" --inputbox "-tickrate 当前值:" 10 60 "$tickrate" 3>&1 1>&2 2>&3)
-                    if [ $? -eq 0 ]; then
-                        tickrate="$new_tickrate"
-                    fi
-                    ;;
-                other)
-                    local new_other
-                    new_other=$(whiptail --title "$(strip_colors "$M_OPT_ARGS")" --inputbox "其他参数 (空格分隔，保持原样附加在最后):" 10 60 "$joined_other" 3>&1 1>&2 2>&3)
-                    if [ $? -eq 0 ]; then
-                        joined_other="$new_other"
-                        if [ -n "$joined_other" ]; then
-                            read -ra others <<< "$joined_other"
-                        else
-                            others=()
-                        fi
-                    fi
-                    ;;
-                save)
-                    local new_cmd="$exe"
-                    if [ -n "$game" ]; then new_cmd="$new_cmd -game $game"; fi
-                    if [ -n "$port" ]; then new_cmd="$new_cmd -port $port"; fi
-                    if [ -n "$ip" ]; then new_cmd="$new_cmd -ip $ip"; fi
-                    if [ -n "$map" ]; then new_cmd="$new_cmd +map $map"; fi
-                    if [ -n "$maxplayers" ]; then new_cmd="$new_cmd +maxplayers $maxplayers"; fi
-                    if [ -n "$tickrate" ]; then new_cmd="$new_cmd -tickrate $tickrate"; fi
-                    if [ ${#others[@]} -gt 0 ]; then
-                        new_cmd="$new_cmd ${others[*]}"
-                    fi
-                    eval $__out_var=\"\$new_cmd\"
-                    return
-                    ;;
-                cancel)
-                    eval $__out_var=""
-                    return
-                    ;;
-            esac
-        done
-    else
-        local joined_other="${others[*]}"
-        local tmp_other=""
-        tui_input "-game 当前值:" "$game" game
-        tui_input "-port 当前值:" "$port" port
-        tui_input "-ip 当前值:" "$ip" ip
-        tui_input "+map 当前值:" "$map" map
-        tui_input "+maxplayers 当前值:" "$maxplayers" maxplayers
-        tui_input "-tickrate 当前值:" "$tickrate" tickrate
-        tui_input "其他参数 (空格分隔，保持原样附加在最后):" "$joined_other" tmp_other
-        if [ -n "$tmp_other" ]; then
-            read -ra others <<< "$tmp_other"
-        else
-            others=()
-        fi
-        local new_cmd="$exe"
-        if [ -n "$game" ]; then new_cmd="$new_cmd -game $game"; fi
-        if [ -n "$port" ]; then new_cmd="$new_cmd -port $port"; fi
-        if [ -n "$ip" ]; then new_cmd="$new_cmd -ip $ip"; fi
-        if [ -n "$map" ]; then new_cmd="$new_cmd +map $map"; fi
-        if [ -n "$maxplayers" ]; then new_cmd="$new_cmd +maxplayers $maxplayers"; fi
-        if [ -n "$tickrate" ]; then new_cmd="$new_cmd -tickrate $tickrate"; fi
-        if [ ${#others[@]} -gt 0 ]; then
-            new_cmd="$new_cmd ${others[*]}"
-        fi
-        eval $__out_var=\"\$new_cmd\"
-    fi
+                ;;
+        esac
+    done
 }
 
 toggle_auto() {
@@ -3284,6 +3297,7 @@ main() {
     
     check_deps
     if [ ! -f "$DATA_FILE" ]; then touch "$DATA_FILE"; fi
+    ensure_remote_version_cached
     
     while true; do
         local remote_ver_cached=""
