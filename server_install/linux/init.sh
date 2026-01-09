@@ -1782,6 +1782,12 @@ load_i18n() {
         M_ARGS_ADD="添加新启动项"
         M_ARGS_ACTIVE="[当前]"
         M_ARGS_NAME_PROMPT="启动项名称:"
+        M_ARGS_EDIT="编辑当前实例启动参数"
+        M_ARGS_RESTORE_DEFAULT="恢复默认启动参数"
+        M_ARGS_SAVE_AS_INSTANCE_DEFAULT="保存当前启动项为当前实例默认启动项"
+        M_ARGS_SAVE_AS_SCHEME="保存当前实例启动项为启动项方案"
+        M_ARGS_CHOOSE_SCHEME="启动项方案选择"
+        M_NO_SCHEMES="暂无可用方案"
         M_AUTO_SET="${GREEN}自启已设置为:${NC}"
         M_BACKUP_START="${CYAN}正在执行精简备份 (含Metamod、插件清单及数据)...${NC}"
         M_BACKUP_OK="${GREEN}备份成功:${NC}"
@@ -1884,6 +1890,12 @@ load_i18n() {
         M_ARGS_ADD="Add new launch preset"
         M_ARGS_ACTIVE="[Current]"
         M_ARGS_NAME_PROMPT="Preset name:"
+        M_ARGS_EDIT="Edit current instance launch args"
+        M_ARGS_RESTORE_DEFAULT="Restore default launch args"
+        M_ARGS_SAVE_AS_INSTANCE_DEFAULT="Save current as instance default"
+        M_ARGS_SAVE_AS_SCHEME="Save current as a scheme"
+        M_ARGS_CHOOSE_SCHEME="Choose scheme"
+        M_NO_SCHEMES="No schemes available"
         M_INIT_STEAMCMD="${YELLOW}Initializing SteamCMD...${NC}"
         M_DL_STEAMCMD="${CYAN}Downloading SteamCMD...${NC}"
         M_EXTRACTING="${CYAN}Extracting...${NC}"
@@ -2393,261 +2405,121 @@ edit_args() {
     fi
     while true; do
         current_line=$(grep "./srcds_run" "$s" | head -n1)
-        local names=()
-        local cmds=()
-        while IFS='|' read -r name cmd; do
-            if [ -n "$name" ]; then
-                names+=("$name")
-                cmds+=("$cmd")
-            fi
-        done < "$preset_file"
-        local count=${#names[@]}
-        if [ $count -eq 0 ]; then
-            printf "%s|%s\n" "默认" "$current_line" > "$preset_file"
-            continue
+        local curr_name="自定义"
+        if [ -f "$preset_file" ]; then
+            while IFS='|' read -r n_cmd_name n_cmd; do
+                if [ "$n_cmd" = "$current_line" ]; then curr_name="$n_cmd_name"; break; fi
+            done < "$preset_file"
         fi
-        local opts=()
-        local i
-        for ((i=0;i<count;i++)); do
-            local tag=""
-            if [ "${cmds[i]}" = "$current_line" ]; then
-                tag=" ${M_ARGS_ACTIVE}"
-            fi
-            opts+=("${names[i]}${tag}")
-        done
-        opts+=("$M_ARGS_ADD")
-        opts+=("$M_RETURN")
+        local edit_label="${M_ARGS_EDIT}[${curr_name}]"
         MENU_TITLE="$M_OPT_ARGS"
-        tui_menu "$M_ARGS_MENU_HINT" "${opts[@]}"
-        local choice=$?
-        local total=${#opts[@]}
-        if [ $choice -eq 255 ] || [ $choice -ge $total ]; then
-            return
-        fi
-        if [ $choice -eq $count ]; then
-            local new_name=""
-            local new_cmd=""
-            MENU_TITLE="$M_OPT_ARGS"
-            tui_input "$M_ARGS_NAME_PROMPT" "" new_name
-            if [ -z "$new_name" ]; then
-                continue
-            fi
-            echo -e "$M_CURRENT $current_line"
-            echo -e "$M_NEW_CMD"
-            echo -n "  "
-            read -e new_cmd
-            if [ -z "$new_cmd" ]; then
-                new_cmd="$current_line"
-            fi
-            if [ -z "$new_cmd" ]; then
-                continue
-            fi
-            printf "%s|%s\n" "$new_name" "$new_cmd" >> "$preset_file"
-            local esc_add
-            esc_add=$(printf '%s\n' "$new_cmd" | sed 's:[][\/.^$*]:\\&:g')
-            sed -i "s|^\./srcds_run.*|$esc_add|" "$s"
-            MENU_TITLE="$M_OPT_ARGS" tui_msgbox "$M_SAVED"
-            continue
-        fi
-        if [ $choice -eq $((count+1)) ]; then
-            return
-        fi
-        if [ $choice -lt $count ]; then
-            local old_name="${names[$choice]}"
-            local old_cmd="${cmds[$choice]}"
-            local edit_cmd=""
-            echo -e "$M_CURRENT $old_cmd"
-            echo -e "$M_NEW_CMD"
-            echo -n "  "
-            read -e edit_cmd
-            if [ -z "$edit_cmd" ]; then
-                edit_cmd="$old_cmd"
-            fi
-            if [ -z "$edit_cmd" ]; then
-                continue
-            fi
-            names[$choice]="$old_name"
-            cmds[$choice]="$edit_cmd"
-            : > "$preset_file"
-            for ((i=0;i<count;i++)); do
-                printf "%s|%s\n" "${names[i]}" "${cmds[i]}" >> "$preset_file"
-            done
-            local esc
-            esc=$(printf '%s\n' "$edit_cmd" | sed 's:[][\/.^$*]:\\&:g')
-            sed -i "s|^\./srcds_run.*|$esc|" "$s"
-            MENU_TITLE="$M_OPT_ARGS" tui_msgbox "$M_SAVED"
-        fi
-    done
-}
-
-edit_launch_cmd_interactive() {
-    local orig="$1"
-    local __out_var="$2"
-    local exe="./srcds_run"
-    local game=""
-    local port=""
-    local ip=""
-    local map=""
-    local maxplayers=""
-    local tickrate=""
-    local others=()
-
-    read -ra parts <<< "$orig"
-    local i=0
-    if [ ${#parts[@]} -gt 0 ]; then
-        exe="${parts[0]}"
-        i=1
-    fi
-
-    while [ $i -lt ${#parts[@]} ]; do
-        local t="${parts[$i]}"
-        case "$t" in
-            -game)
-                ((i++)); game="${parts[$i]:-$game}"
+        tui_menu "$M_ARGS_MENU_HINT" \
+            "$edit_label" \
+            "$M_ARGS_RESTORE_DEFAULT" \
+            "$M_ARGS_SAVE_AS_INSTANCE_DEFAULT" \
+            "$M_ARGS_SAVE_AS_SCHEME" \
+            "$M_ARGS_CHOOSE_SCHEME" \
+            "$M_RETURN"
+        case $? in
+            0)
+                local new_cmd=""
+                echo -e "$M_CURRENT $current_line"
+                echo -e "$M_NEW_CMD"
+                echo -n "  "
+                if read -e -i "$current_line" new_cmd; then :; fi
+                if [ -z "$new_cmd" ]; then new_cmd="$current_line"; fi
+                if [ -z "$new_cmd" ]; then continue; fi
+                local esc
+                esc=$(printf '%s\n' "$new_cmd" | sed 's:[][\/.^$*]:\\&:g')
+                sed -i "s|^\./srcds_run.*|$esc|" "$s"
+                MENU_TITLE="$M_OPT_ARGS" tui_msgbox "$M_SAVED"
                 ;;
-            -port)
-                ((i++)); port="${parts[$i]:-$port}"
+            1)
+                local def_cmd=""
+                def_cmd=$(grep -m1 "^默认|" "$preset_file" | cut -d'|' -f2-)
+                if [ -z "$def_cmd" ]; then def_cmd="$current_line"; fi
+                local esc_def
+                esc_def=$(printf '%s\n' "$def_cmd" | sed 's:[][\/.^$*]:\\&:g')
+                sed -i "s|^\./srcds_run.*|$esc_def|" "$s"
+                local edit_cmd=""
+                echo -e "$M_CURRENT $def_cmd"
+                echo -e "$M_NEW_CMD"
+                echo -n "  "
+                if read -e -i "$def_cmd" edit_cmd; then :; fi
+                if [ -z "$edit_cmd" ]; then edit_cmd="$def_cmd"; fi
+                if [ -z "$edit_cmd" ]; then continue; fi
+                local esc2
+                esc2=$(printf '%s\n' "$edit_cmd" | sed 's:[][\/.^$*]:\\&:g')
+                sed -i "s|^\./srcds_run.*|$esc2|" "$s"
+                MENU_TITLE="$M_OPT_ARGS" tui_msgbox "$M_SAVED"
                 ;;
-            -ip)
-                ((i++)); ip="${parts[$i]:-$ip}"
+            2)
+                local cur_cmd="$current_line"
+                if grep -q "^默认|" "$preset_file"; then
+                    grep -v "^默认|" "$preset_file" > "${preset_file}.tmp"
+                    printf "%s|%s\n" "默认" "$cur_cmd" >> "${preset_file}.tmp"
+                    mv "${preset_file}.tmp" "$preset_file"
+                else
+                    printf "%s|%s\n" "默认" "$cur_cmd" >> "$preset_file"
+                fi
+                MENU_TITLE="$M_OPT_ARGS" tui_msgbox "$M_SAVED"
                 ;;
-            +map)
-                ((i++)); map="${parts[$i]:-$map}"
+            3)
+                local inst_name=""
+                if [ -f "$DATA_FILE" ]; then
+                    inst_name=$(awk -F'|' -v path="$p" '$2==path {print $1; exit}' "$DATA_FILE")
+                fi
+                if [ -z "$inst_name" ]; then inst_name="方案"; fi
+                local scheme_name=""
+                MENU_TITLE="$M_OPT_ARGS"
+                tui_input "$M_ARGS_NAME_PROMPT" "$inst_name" scheme_name
+                if [ -z "$scheme_name" ]; then continue; fi
+                local schemes="${FINAL_ROOT}/run_schemes.dat"
+                touch "$schemes"
+                grep -v "^${scheme_name}|" "$schemes" > "${schemes}.tmp"
+                printf "%s|%s|%s\n" "$scheme_name" "$current_line" "$inst_name" >> "${schemes}.tmp"
+                mv "${schemes}.tmp" "$schemes"
+                MENU_TITLE="$M_OPT_ARGS" tui_msgbox "$M_SAVED"
                 ;;
-            +maxplayers)
-                ((i++)); maxplayers="${parts[$i]:-$maxplayers}"
+            4)
+                local schemes="${FINAL_ROOT}/run_schemes.dat"
+                if [ ! -f "$schemes" ] || ! grep -q '|' "$schemes" 2>/dev/null; then
+                    MENU_TITLE="$M_OPT_ARGS" tui_msgbox "$M_NO_SCHEMES"
+                    continue
+                fi
+                local items=()
+                local cmd_map=()
+                while IFS='|' read -r scn scc scsrc; do
+                    if [ -n "$scn" ] && [ -n "$scc" ]; then
+                        items+=("${scn} (${scsrc})")
+                        cmd_map+=("$scc|$scn")
+                    fi
+                done < "$schemes"
+                if [ "${#items[@]}" -eq 0 ]; then
+                    MENU_TITLE="$M_OPT_ARGS" tui_msgbox "$M_NO_SCHEMES"
+                    continue
+                fi
+                MENU_TITLE="$M_OPT_ARGS"
+                tui_menu "选择一个方案应用到当前实例:" "${items[@]}" "$M_RETURN"
+                local idx=$?
+                if [ $idx -eq 255 ] || [ $idx -ge $(( ${#items[@]} + 1 )) ]; then continue; fi
+                if [ $idx -eq ${#items[@]} ]; then continue; fi
+                local pair="${cmd_map[$idx]}"
+                local sel_cmd="${pair%%|*}"
+                local sel_name="${pair##*|}"
+                local esc_sel
+                esc_sel=$(printf '%s\n' "$sel_cmd" | sed 's:[][\/.^$*]:\\&:g')
+                sed -i "s|^\./srcds_run.*|$esc_sel|" "$s"
+                if ! grep -q "^${sel_name}|" "$preset_file"; then
+                    printf "%s|%s\n" "$sel_name" "$sel_cmd" >> "$preset_file"
+                fi
+                MENU_TITLE="$M_OPT_ARGS" tui_msgbox "$M_SAVED"
                 ;;
-            -tickrate)
-                ((i++)); tickrate="${parts[$i]:-$tickrate}"
-                ;;
-            *)
-                others+=("$t")
+            5|255)
+                return
                 ;;
         esac
-        ((i++))
     done
-
-    if command -v whiptail >/dev/null 2>&1; then
-        while true; do
-            local joined_other="${others[*]}"
-            local choice
-            choice=$(whiptail --title "$(strip_colors "$M_OPT_ARGS")" --menu "请选择要编辑的启动参数:\n左侧为启动项，右侧为当前值。" 20 72 10 \
-                "game" "-game [$game]" \
-                "port" "-port [$port]" \
-                "ip" "-ip [$ip]" \
-                "map" "+map [$map]" \
-                "maxplayers" "+maxplayers [$maxplayers]" \
-                "tickrate" "-tickrate [$tickrate]" \
-                "other" "其他参数 [$joined_other]" \
-                "save" "保存并返回" \
-                "cancel" "取消" \
-                3>&1 1>&2 2>&3)
-            if [ $? -ne 0 ]; then
-                eval $__out_var=""
-                return
-            fi
-            case "$choice" in
-                game)
-                    local new_game
-                    new_game=$(whiptail --title "$(strip_colors "$M_OPT_ARGS")" --inputbox "-game 当前值:" 10 60 "$game" 3>&1 1>&2 2>&3)
-                    if [ $? -eq 0 ]; then
-                        game="$new_game"
-                    fi
-                    ;;
-                port)
-                    local new_port
-                    new_port=$(whiptail --title "$(strip_colors "$M_OPT_ARGS")" --inputbox "-port 当前值:" 10 60 "$port" 3>&1 1>&2 2>&3)
-                    if [ $? -eq 0 ]; then
-                        port="$new_port"
-                    fi
-                    ;;
-                ip)
-                    local new_ip
-                    new_ip=$(whiptail --title "$(strip_colors "$M_OPT_ARGS")" --inputbox "-ip 当前值:" 10 60 "$ip" 3>&1 1>&2 2>&3)
-                    if [ $? -eq 0 ]; then
-                        ip="$new_ip"
-                    fi
-                    ;;
-                map)
-                    local new_map
-                    new_map=$(whiptail --title "$(strip_colors "$M_OPT_ARGS")" --inputbox "+map 当前值:" 10 60 "$map" 3>&1 1>&2 2>&3)
-                    if [ $? -eq 0 ]; then
-                        map="$new_map"
-                    fi
-                    ;;
-                maxplayers)
-                    local new_maxplayers
-                    new_maxplayers=$(whiptail --title "$(strip_colors "$M_OPT_ARGS")" --inputbox "+maxplayers 当前值:" 10 60 "$maxplayers" 3>&1 1>&2 2>&3)
-                    if [ $? -eq 0 ]; then
-                        maxplayers="$new_maxplayers"
-                    fi
-                    ;;
-                tickrate)
-                    local new_tickrate
-                    new_tickrate=$(whiptail --title "$(strip_colors "$M_OPT_ARGS")" --inputbox "-tickrate 当前值:" 10 60 "$tickrate" 3>&1 1>&2 2>&3)
-                    if [ $? -eq 0 ]; then
-                        tickrate="$new_tickrate"
-                    fi
-                    ;;
-                other)
-                    local new_other
-                    new_other=$(whiptail --title "$(strip_colors "$M_OPT_ARGS")" --inputbox "其他参数 (空格分隔，保持原样附加在最后):" 10 60 "$joined_other" 3>&1 1>&2 2>&3)
-                    if [ $? -eq 0 ]; then
-                        joined_other="$new_other"
-                        if [ -n "$joined_other" ]; then
-                            read -ra others <<< "$joined_other"
-                        else
-                            others=()
-                        fi
-                    fi
-                    ;;
-                save)
-                    local new_cmd="$exe"
-                    if [ -n "$game" ]; then new_cmd="$new_cmd -game $game"; fi
-                    if [ -n "$port" ]; then new_cmd="$new_cmd -port $port"; fi
-                    if [ -n "$ip" ]; then new_cmd="$new_cmd -ip $ip"; fi
-                    if [ -n "$map" ]; then new_cmd="$new_cmd +map $map"; fi
-                    if [ -n "$maxplayers" ]; then new_cmd="$new_cmd +maxplayers $maxplayers"; fi
-                    if [ -n "$tickrate" ]; then new_cmd="$new_cmd -tickrate $tickrate"; fi
-                    if [ ${#others[@]} -gt 0 ]; then
-                        new_cmd="$new_cmd ${others[*]}"
-                    fi
-                    eval $__out_var=\"\$new_cmd\"
-                    return
-                    ;;
-                cancel)
-                    eval $__out_var=""
-                    return
-                    ;;
-            esac
-        done
-    else
-        local joined_other="${others[*]}"
-        local tmp_other=""
-        tui_input "-game 当前值:" "$game" game
-        tui_input "-port 当前值:" "$port" port
-        tui_input "-ip 当前值:" "$ip" ip
-        tui_input "+map 当前值:" "$map" map
-        tui_input "+maxplayers 当前值:" "$maxplayers" maxplayers
-        tui_input "-tickrate 当前值:" "$tickrate" tickrate
-        tui_input "其他参数 (空格分隔，保持原样附加在最后):" "$joined_other" tmp_other
-        if [ -n "$tmp_other" ]; then
-            read -ra others <<< "$tmp_other"
-        else
-            others=()
-        fi
-        local new_cmd="$exe"
-        if [ -n "$game" ]; then new_cmd="$new_cmd -game $game"; fi
-        if [ -n "$port" ]; then new_cmd="$new_cmd -port $port"; fi
-        if [ -n "$ip" ]; then new_cmd="$new_cmd -ip $ip"; fi
-        if [ -n "$map" ]; then new_cmd="$new_cmd +map $map"; fi
-        if [ -n "$maxplayers" ]; then new_cmd="$new_cmd +maxplayers $maxplayers"; fi
-        if [ -n "$tickrate" ]; then new_cmd="$new_cmd -tickrate $tickrate"; fi
-        if [ ${#others[@]} -gt 0 ]; then
-            new_cmd="$new_cmd ${others[*]}"
-        fi
-        eval $__out_var=\"\$new_cmd\"
-    fi
 }
 
 toggle_auto() {
