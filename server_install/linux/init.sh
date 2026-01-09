@@ -77,6 +77,7 @@ CONFIG_FILE="${FINAL_ROOT}/config.dat"
 STEAMCMD_DIR="${FINAL_ROOT}/steamcmd_common"
 SERVER_CACHE_DIR="${FINAL_ROOT}/server_cache"
 TRAFFIC_DIR="${FINAL_ROOT}/traffic_logs"
+TRAFFIC_BACKEND="auto"
 BACKUP_DIR="${FINAL_ROOT}/backups"
 DEFAULT_APPID="222860"
 
@@ -1673,7 +1674,7 @@ load_i18n() {
         M_TODAY="今日:"
         M_MONTH="本月:"
         M_NO_HISTORY="暂无历史数据"
-        M_TRAFFIC_UNSUPPORTED="${YELLOW}当前系统使用 nftables 后端，暂不支持流量统计。${NC}"
+        M_TRAFFIC_UNSUPPORTED="${YELLOW}当前系统未检测到兼容的流量统计后端，无法按端口统计流量。${NC}"
         M_PRESS_KEY="${YELLOW}按任意键返回...${NC}"
         M_INIT_STEAMCMD="${YELLOW}初始化 SteamCMD...${NC}"
         M_DL_STEAMCMD="${CYAN}正在下载 SteamCMD 安装包...${NC}"
@@ -1816,7 +1817,7 @@ load_i18n() {
         M_TODAY="Today:"
         M_MONTH="Month:"
         M_NO_HISTORY="No history data"
-        M_TRAFFIC_UNSUPPORTED="${YELLOW}Traffic stats not available: nftables backend detected.${NC}"
+        M_TRAFFIC_UNSUPPORTED="${YELLOW}Traffic stats backend not available on this system; per-port stats disabled.${NC}"
         M_PRESS_KEY="${YELLOW}Press any key to return...${NC}"
         M_INIT_STEAMCMD="${YELLOW}Initializing SteamCMD...${NC}"
         M_DL_STEAMCMD="${CYAN}Downloading SteamCMD...${NC}"
@@ -2410,6 +2411,29 @@ delete_srv() {
 
 traffic_daemon() {
     if [ "$EUID" -ne 0 ]; then echo "Root only"; exit 1; fi
+    if [ "$TRAFFIC_BACKEND" = "auto" ] || [ -z "$TRAFFIC_BACKEND" ]; then
+        if command -v iptables >/dev/null 2>&1; then
+            local out
+            out=$(iptables -nvxL 2>&1 || true)
+            if echo "$out" | grep -q "use 'nft' tool"; then
+                if command -v nft >/dev/null 2>&1; then
+                    TRAFFIC_BACKEND="nft"
+                else
+                    TRAFFIC_BACKEND="unsupported"
+                fi
+            else
+                TRAFFIC_BACKEND="iptables"
+            fi
+        elif command -v nft >/dev/null 2>&1; then
+            TRAFFIC_BACKEND="nft"
+        else
+            TRAFFIC_BACKEND="none"
+        fi
+    fi
+    if [ "$TRAFFIC_BACKEND" != "iptables" ]; then
+        echo "Traffic stats backend not supported on this system." >&2
+        exit 0
+    fi
     mkdir -p "$TRAFFIC_DIR"
     iptables -N L4M_STATS 2>/dev/null
     if ! iptables -C INPUT -j L4M_STATS 2>/dev/null; then iptables -I INPUT -j L4M_STATS; fi
@@ -2446,17 +2470,35 @@ traffic_daemon() {
 view_traffic() {
     local n="$1"; local port="$2"
     if [ "$EUID" -ne 0 ]; then MENU_TITLE="$M_OPT_TRAFFIC" tui_msgbox "$M_NEED_ROOT"; return; fi
-    local check_out
-    check_out=$(iptables -nvxL L4M_STATS 2>&1 || true)
-    if echo "$check_out" | grep -q "use 'nft' tool"; then
+    if [ "$TRAFFIC_BACKEND" = "auto" ] || [ -z "$TRAFFIC_BACKEND" ]; then
+        if command -v iptables >/dev/null 2>&1; then
+            local out
+            out=$(iptables -nvxL 2>&1 || true)
+            if echo "$out" | grep -q "use 'nft' tool"; then
+                if command -v nft >/dev/null 2>&1; then
+                    TRAFFIC_BACKEND="nft"
+                else
+                    TRAFFIC_BACKEND="unsupported"
+                fi
+            else
+                TRAFFIC_BACKEND="iptables"
+            fi
+        elif command -v nft >/dev/null 2>&1; then
+            TRAFFIC_BACKEND="nft"
+        else
+            TRAFFIC_BACKEND="none"
+        fi
+    fi
+    if [ "$TRAFFIC_BACKEND" != "iptables" ]; then
         while true; do
             tui_header
             echo -e "$M_TRAFFIC_STATS $n ($port)\n----------------------------------------"
             echo -e "$M_TRAFFIC_UNSUPPORTED"
             echo "----------------------------------------"
             echo -e "$M_PRESS_KEY"
-            read -n 1 -s -r k
+            read -n 1 -s -r -t 5 k || true
             if [ -n "$k" ]; then break; fi
+            break
         done
         return
     fi
