@@ -9,7 +9,7 @@ Designed for Linux environments, supporting all platforms (VPS, Dedicated Server
 *   **🚀 One-Click Install & Persistence**: Automatically installs to system. Default path unified to `~/L4D2_Servers` for easier management.
 *   **💻 Powerful CLI Tool**: Manage everything using `l4m` command. Supports self-update (`l4m update`).
 *   **🖥️ Modern TUI**: Full graphical menu with real-time traffic monitoring and progress bars for downloads.
-*   **📦 Multi-Instance**: Deploy unlimited server instances with independent configs.
+*   **📦 Multi-Instance**: Deploy unlimited server instances using Copy-On-Write (COW) principles. Shares core files (`bin`, `hl2`, etc.) via symlinks to save space and deploy instantly.
 *   **🔌 Smart Plugin Manager**: 
     *   **Global Repo**: Shared `~/L4D2_Plugins` directory saves space.
     *   **Install Tracking**: Tracks installed plugins to avoid duplicates.

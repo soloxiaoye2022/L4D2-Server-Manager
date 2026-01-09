@@ -90,6 +90,8 @@ mkdir -p "$JS_MODS_DIR"
 
 # 链接清单定义
 LINK_DIRS=(
+    "bin"
+    "hl2"
     "left4dead2/bin"
     "left4dead2/expressions"
     "left4dead2/gfx"
