@@ -2414,7 +2414,8 @@ traffic_daemon() {
     if [ "$TRAFFIC_BACKEND" = "auto" ] || [ -z "$TRAFFIC_BACKEND" ]; then
         if command -v iptables >/dev/null 2>&1; then
             local out
-            out=$(iptables -nvxL 2>&1 || true)
+            # 直接针对 L4M_STATS 链做兼容性检测，以捕获 nf_tables 的报错
+            out=$(iptables -nvxL L4M_STATS 2>&1 || true)
             if echo "$out" | grep -q "use 'nft' tool"; then
                 if command -v nft >/dev/null 2>&1; then
                     TRAFFIC_BACKEND="nft"
@@ -2473,7 +2474,8 @@ view_traffic() {
     if [ "$TRAFFIC_BACKEND" = "auto" ] || [ -z "$TRAFFIC_BACKEND" ]; then
         if command -v iptables >/dev/null 2>&1; then
             local out
-            out=$(iptables -nvxL 2>&1 || true)
+            # 直接针对 L4M_STATS 链做兼容性检测，以捕获 nf_tables 的报错
+            out=$(iptables -nvxL L4M_STATS 2>&1 || true)
             if echo "$out" | grep -q "use 'nft' tool"; then
                 if command -v nft >/dev/null 2>&1; then
                     TRAFFIC_BACKEND="nft"
