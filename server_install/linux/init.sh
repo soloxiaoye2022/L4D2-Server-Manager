@@ -80,6 +80,8 @@ TRAFFIC_DIR="${FINAL_ROOT}/traffic_logs"
 TRAFFIC_BACKEND="auto"
 BACKUP_DIR="${FINAL_ROOT}/backups"
 DEFAULT_APPID="222860"
+L4M_VERSION="0.1.0"
+REMOTE_VERSION_CACHE="${FINAL_ROOT}/remote_version.dat"
 
 # 默认插件库目录
 if [ -f "$PLUGIN_CONFIG" ]; then 
@@ -732,6 +734,11 @@ self_update() {
         # 增加文件大小校验 (>10KB) 防止下载到错误页面
         local fsize=$(wc -c < "$temp" 2>/dev/null || echo 0)
         if grep -q "main()" "$temp" && [ "$fsize" -gt 10240 ]; then
+            local remote_ver="unknown"
+            if grep -q 'L4M_VERSION=' "$temp"; then
+                remote_ver=$(grep 'L4M_VERSION=' "$temp" | head -n1 | cut -d'=' -f2 | tr -d '"')
+            fi
+            echo "$remote_ver" > "$REMOTE_VERSION_CACHE"
             mv "$temp" "$FINAL_ROOT/l4m"; chmod +x "$FINAL_ROOT/l4m"
             MENU_TITLE="$M_UPDATE" tui_msgbox "$M_UPDATE_SUCCESS"; exec "$FINAL_ROOT/l4m"
         else
@@ -3094,10 +3101,24 @@ main() {
     fi
     
     check_deps
+
+    local remote_ver_display=""
+    if [ -f "$REMOTE_VERSION_CACHE" ]; then
+        local remote_ver_cached
+        remote_ver_cached=$(head -n1 "$REMOTE_VERSION_CACHE" 2>/dev/null)
+        if [ -n "$remote_ver_cached" ]; then
+            if [ "$remote_ver_cached" != "$L4M_VERSION" ]; then
+                remote_ver_display="  ${YELLOW}(新版本: v${remote_ver_cached})${NC}"
+            else
+                remote_ver_display="  ${GREEN}(已是最新)${NC}"
+            fi
+        fi
+    fi
     if [ ! -f "$DATA_FILE" ]; then touch "$DATA_FILE"; fi
     
     while true; do
-        tui_menu "$M_MAIN_MENU" "$M_DEPLOY" "$M_MANAGE" "$M_DOWNLOAD_PACKAGES" "$M_DEPS" "$M_UPDATE" "$M_LANG" "$M_UNINSTALL_MENU" "$M_EXIT"
+        local main_title="${M_MAIN_MENU}  ${GREY}v${L4M_VERSION}${NC}${remote_ver_display}"
+        tui_menu "$main_title" "$M_DEPLOY" "$M_MANAGE" "$M_DOWNLOAD_PACKAGES" "$M_DEPS" "$M_UPDATE" "$M_LANG" "$M_UNINSTALL_MENU" "$M_EXIT"
         case $? in
             0) deploy_wizard ;; 1) manage_menu ;; 2) download_packages ;; 3) dep_manager_menu ;; 4) self_update ;; 5) change_lang ;; 6) uninstall_menu ;; 7|255) exit 0 ;;
         esac
