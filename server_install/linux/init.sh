@@ -1357,7 +1357,8 @@ manage_plugins() {
         fi
         local count_text
         count_text=$(printf "$M_SELECTED_COUNT_LABEL" "$pre_selected" "$tot")
-        local raw_hint="${inst_info}${count_text}\n$M_SELECT_HINT"
+        # 先放操作提示，再放实例信息和数量，让第一行永远是“空格/回车”等说明
+        local raw_hint="$M_SELECT_HINT\n${inst_info}${count_text}"
         local clean_hint
         clean_hint=$(printf "%b" "$raw_hint" | sed 's/\\033\[[0-9;]*m//g' | sed 's/\x1b\[[0-9;]*m//g')
         # Use index as tag to avoid issues with spaces/special chars in names
@@ -1740,7 +1741,7 @@ load_i18n() {
         M_INSTANCE_NAME_LABEL="${CYAN}当前实例:${NC}"
         M_INSTANCE_DIR_LABEL="${CYAN}实例目录:${NC}"
         M_SELECTED_COUNT_LABEL="${YELLOW}当前选中插件: %d / %d 个${NC}"
-        M_SELECT_HINT="${YELLOW}操作提示: 空格=选择/取消  回车=确认  ↑↓=上下移动  鼠标滚轮=滚动列表${NC}"
+        M_SELECT_HINT="${YELLOW}操作：空格=选择/取消  回车=确认  方向键=移动  鼠标滚轮=滚动列表${NC}"
         M_DONE="${GREEN}完成${NC}"
         M_LOCAL_PKG="${CYAN}发现本地预置包，正在安装...${NC}"
         M_CONN_OFFICIAL="${CYAN}正在连接官网(sourcemod.net)获取最新版本...${NC}"
