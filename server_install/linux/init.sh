@@ -2490,16 +2490,13 @@ view_traffic() {
         fi
     fi
     if [ "$TRAFFIC_BACKEND" != "iptables" ]; then
-        while true; do
-            tui_header
-            echo -e "$M_TRAFFIC_STATS $n ($port)\n----------------------------------------"
-            echo -e "$M_TRAFFIC_UNSUPPORTED"
-            echo "----------------------------------------"
-            echo -e "$M_PRESS_KEY"
-            read -n 1 -s -r -t 5 k || true
-            if [ -n "$k" ]; then break; fi
-            break
-        done
+        tui_header
+        echo -e "$M_TRAFFIC_STATS $n ($port)\n----------------------------------------"
+        echo -e "$M_TRAFFIC_UNSUPPORTED"
+        echo "----------------------------------------"
+        echo -e "$M_PRESS_KEY"
+        # 读取任意单键（包括回车），最多等待 10 秒，然后直接返回上级菜单
+        read -rsn1 -t 10 k 2>/dev/null || true
         return
     fi
     while true; do
