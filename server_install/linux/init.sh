@@ -1729,6 +1729,10 @@ load_i18n() {
         M_CURRENT="${CYAN}当前:${NC}"
         M_NEW_CMD="${YELLOW}新指令:${NC}"
         M_SAVED="${GREEN}保存${NC}"
+        M_ARGS_MENU_HINT="请选择要编辑/启用的启动项:\n(当前启动项后面会标注 [当前])"
+        M_ARGS_ADD="添加新启动项"
+        M_ARGS_ACTIVE="[当前]"
+        M_ARGS_NAME_PROMPT="启动项名称:"
         M_AUTO_SET="${GREEN}自启已设置为:${NC}"
         M_BACKUP_START="${CYAN}正在执行精简备份 (含Metamod、插件清单及数据)...${NC}"
         M_BACKUP_OK="${GREEN}备份成功:${NC}"
@@ -1819,6 +1823,10 @@ load_i18n() {
         M_NO_HISTORY="No history data"
         M_TRAFFIC_UNSUPPORTED="${YELLOW}Traffic stats backend not available on this system; per-port stats disabled.${NC}"
         M_PRESS_KEY="${YELLOW}Press any key to return...${NC}"
+        M_ARGS_MENU_HINT="Select a launch preset to edit/enable:\n(Current preset is marked [Current])"
+        M_ARGS_ADD="Add new launch preset"
+        M_ARGS_ACTIVE="[Current]"
+        M_ARGS_NAME_PROMPT="Preset name:"
         M_INIT_STEAMCMD="${YELLOW}Initializing SteamCMD...${NC}"
         M_DL_STEAMCMD="${CYAN}Downloading SteamCMD...${NC}"
         M_EXTRACTING="${CYAN}Extracting...${NC}"
@@ -2302,14 +2310,102 @@ view_log() {
 }
 
 edit_args() {
-    local s="$1/run_guard.sh"; local c=$(grep "./srcds_run" "$s")
-    tui_header; echo -e "$M_CURRENT $c\n$M_NEW_CMD"
-    read -e -i "$c" new
-    if [ -n "$new" ]; then
-        local esc=$(printf '%s\n' "$new" | sed 's:[][\/.^$*]:\\&:g')
-        sed -i "s|^\./srcds_run.*|$new|" "$s"; echo -e "$M_SAVED"
+    local p="$1"
+    local s="$p/run_guard.sh"
+    if [ ! -f "$s" ]; then
+        MENU_TITLE="$M_OPT_ARGS" tui_msgbox "$M_NO_SRCDS"
+        return
     fi
-    sleep 1
+    local preset_file="$p/run_presets.dat"
+    local current_line
+    current_line=$(grep "./srcds_run" "$s" | head -n1)
+    if [ -z "$current_line" ]; then
+        MENU_TITLE="$M_OPT_ARGS" tui_msgbox "$M_NO_SRCDS"
+        return
+    fi
+    if [ ! -f "$preset_file" ] || ! grep -q '|' "$preset_file" 2>/dev/null; then
+        printf "%s|%s\n" "默认" "$current_line" > "$preset_file"
+    fi
+    while true; do
+        current_line=$(grep "./srcds_run" "$s" | head -n1)
+        local names=()
+        local cmds=()
+        while IFS='|' read -r name cmd; do
+            if [ -n "$name" ]; then
+                names+=("$name")
+                cmds+=("$cmd")
+            fi
+        done < "$preset_file"
+        local count=${#names[@]}
+        if [ $count -eq 0 ]; then
+            printf "%s|%s\n" "默认" "$current_line" > "$preset_file"
+            continue
+        fi
+        local opts=()
+        local i
+        for ((i=0;i<count;i++)); do
+            local tag=""
+            if [ "${cmds[i]}" = "$current_line" ]; then
+                tag=" ${M_ARGS_ACTIVE}"
+            fi
+            opts+=("${names[i]}${tag}")
+        done
+        opts+=("$M_ARGS_ADD")
+        opts+=("$M_RETURN")
+        MENU_TITLE="$M_OPT_ARGS"
+        tui_menu "$M_ARGS_MENU_HINT" "${opts[@]}"
+        local choice=$?
+        local total=${#opts[@]}
+        if [ $choice -eq 255 ] || [ $choice -ge $total ]; then
+            return
+        fi
+        if [ $choice -eq $count ]; then
+            local new_name=""
+            local new_cmd=""
+            MENU_TITLE="$M_OPT_ARGS"
+            tui_input "$M_ARGS_NAME_PROMPT" "" new_name
+            if [ -z "$new_name" ]; then
+                continue
+            fi
+            MENU_TITLE="$M_OPT_ARGS"
+            tui_input "$M_NEW_CMD" "$current_line" new_cmd
+            if [ -z "$new_cmd" ]; then
+                continue
+            fi
+            printf "%s|%s\n" "$new_name" "$new_cmd" >> "$preset_file"
+            local esc_add
+            esc_add=$(printf '%s\n' "$new_cmd" | sed 's:[][\/.^$*]:\\&:g')
+            sed -i "s|^\./srcds_run.*|$esc_add|" "$s"
+            MENU_TITLE="$M_OPT_ARGS" tui_msgbox "$M_SAVED"
+            continue
+        fi
+        if [ $choice -lt $count ]; then
+            local old_name="${names[$choice]}"
+            local old_cmd="${cmds[$choice]}"
+            local edit_name="$old_name"
+            local edit_cmd="$old_cmd"
+            MENU_TITLE="$M_OPT_ARGS"
+            tui_input "$M_ARGS_NAME_PROMPT" "$old_name" edit_name
+            if [ -z "$edit_name" ]; then
+                edit_name="$old_name"
+            fi
+            MENU_TITLE="$M_OPT_ARGS"
+            tui_input "$M_NEW_CMD" "$old_cmd" edit_cmd
+            if [ -z "$edit_cmd" ]; then
+                edit_cmd="$old_cmd"
+            fi
+            names[$choice]="$edit_name"
+            cmds[$choice]="$edit_cmd"
+            : > "$preset_file"
+            for ((i=0;i<count;i++)); do
+                printf "%s|%s\n" "${names[i]}" "${cmds[i]}" >> "$preset_file"
+            done
+            local esc
+            esc=$(printf '%s\n' "$edit_cmd" | sed 's:[][\/.^$*]:\\&:g')
+            sed -i "s|^\./srcds_run.*|$esc|" "$s"
+            MENU_TITLE="$M_OPT_ARGS" tui_msgbox "$M_SAVED"
+        fi
+    done
 }
 
 toggle_auto() {
