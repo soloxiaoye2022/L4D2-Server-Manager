@@ -1632,7 +1632,6 @@ inst_plat() {
 
 load_i18n() {
     local raw="$1"
-    # 使用 Bash 内置替换去除所有空白字符 (比 tr 更快且不依赖外部命令)
     local lang="${raw//[[:space:]]/}"
     
     # 宽松匹配：只要包含 zh 就认为是中文
@@ -3177,6 +3176,9 @@ main() {
     fi
     # 使用双引号包裹 cat 输出，防止参数传递错误
     if [ -f "$CONFIG_FILE" ]; then load_i18n "$(cat "$CONFIG_FILE")"; else load_i18n "en"; fi
+    if [[ "$CONFIG_FILE" == *"config.dat" ]]; then
+        M_TITLE="=== L4D2 管理器 (L4M) v${L4M_VERSION} ==="
+    fi
     
     if [[ "$INSTALL_TYPE" == "temp" ]]; then
         local exist_path=""
