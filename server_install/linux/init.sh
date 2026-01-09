@@ -90,8 +90,6 @@ mkdir -p "$JS_MODS_DIR"
 
 # 链接清单定义
 LINK_DIRS=(
-    "bin"
-    "hl2"
     "left4dead2/bin"
     "left4dead2/expressions"
     "left4dead2/gfx"
@@ -1973,6 +1971,10 @@ deploy_with_links() {
     cp -f "$src/srcds_run" "$dest/" 2>/dev/null
     cp -f "$src/srcds_linux" "$dest/" 2>/dev/null
     cp -f "$src/left4dead2/steam.inf" "$dest/left4dead2/" 2>/dev/null # steam.inf 经常变动，建议复制
+    
+    # 2.1 复制核心目录 (bin, hl2) - 必须物理复制，不能链接
+    if [ -d "$src/bin" ]; then cp -r "$src/bin" "$dest/"; fi
+    if [ -d "$src/hl2" ]; then cp -r "$src/hl2" "$dest/"; fi
     
     # 3. 链接目录
     for d in "${LINK_DIRS[@]}"; do
