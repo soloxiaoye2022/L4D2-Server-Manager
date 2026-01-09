@@ -1447,12 +1447,17 @@ manage_plugins() {
     for plug in "${to_install[@]}"; do
         echo -e "${GREEN}[安装] $plug${NC}"
         local plugin_dir="${JS_MODS_DIR}/${plug}"
+        # 插件包通常以 left4dead2 作为根目录，这里自动进入该子目录，避免在实例下出现 left4dead2/left4dead2 的嵌套
+        local src_root="$plugin_dir"
+        if [ -d "$plugin_dir/left4dead2" ]; then
+            src_root="$plugin_dir/left4dead2"
+        fi
         local rec_file="$rec_dir/${plug}"
         > "$rec_file"
         
         while IFS= read -r -d '' file; do
             if [ -f "$file" ]; then
-                local rel_path=${file#"$plugin_dir/"}
+                local rel_path=${file#"$src_root/"}
                 local dest="$t/$rel_path"
                 mkdir -p "$(dirname "$dest")"
                 cp -f "$file" "$dest" 2>/dev/null
