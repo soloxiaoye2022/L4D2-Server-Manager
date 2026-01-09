@@ -1783,6 +1783,11 @@ load_i18n() {
         M_GO_SELECT_REPO="前往选择插件库"
         M_GO_DOWNLOAD="前往下载插件包"
         M_REPO_STILL_INVALID="插件库仍未正确设置，无法管理插件。"
+        M_VER_LOCAL="${CYAN}当前版本:${NC}"
+        M_VER_REMOTE="${CYAN}远程最新:${NC}"
+        M_VER_REMOTE_UP_TO_DATE="${GREEN}(已是最新)${NC}"
+        M_VER_REMOTE_NEED_UPDATE="${YELLOW}(有新版本，建议执行“系统更新”)${NC}"
+        M_VER_REMOTE_UNKNOWN="${GREY}远程版本未知 (请先执行一次“系统更新”)${NC}"
     else
         M_TITLE="=== L4D2 Manager (L4M) ==="
         M_WELCOME="Welcome to L4D2 Server Manager (L4M)"
@@ -1925,6 +1930,11 @@ load_i18n() {
         M_REPO_SELECT_TITLE="Multiple Valid Packages Found"
         M_REPO_SELECT_MSG="Please select one as current repo:"
         M_NO_VALID_PKG="${RED}No valid package found (must contain JS-MODS).${NC}"
+        M_VER_LOCAL="${CYAN}Current Version:${NC}"
+        M_VER_REMOTE="${CYAN}Latest Remote:${NC}"
+        M_VER_REMOTE_UP_TO_DATE="${GREEN}(up to date)${NC}"
+        M_VER_REMOTE_NEED_UPDATE="${YELLOW}(new version available, run \"Update System\")${NC}"
+        M_VER_REMOTE_UNKNOWN="${GREY}Remote version unknown (run \"Update System\" once)${NC}"
     fi
 }
 
@@ -3101,24 +3111,25 @@ main() {
     fi
     
     check_deps
-
-    local remote_ver_display=""
-    if [ -f "$REMOTE_VERSION_CACHE" ]; then
-        local remote_ver_cached
-        remote_ver_cached=$(head -n1 "$REMOTE_VERSION_CACHE" 2>/dev/null)
-        if [ -n "$remote_ver_cached" ]; then
-            if [ "$remote_ver_cached" != "$L4M_VERSION" ]; then
-                remote_ver_display="  ${YELLOW}(新版本: v${remote_ver_cached})${NC}"
-            else
-                remote_ver_display="  ${GREEN}(已是最新)${NC}"
-            fi
-        fi
-    fi
     if [ ! -f "$DATA_FILE" ]; then touch "$DATA_FILE"; fi
     
     while true; do
-        local main_title="${M_MAIN_MENU}  ${GREY}v${L4M_VERSION}${NC}${remote_ver_display}"
-        tui_menu "$main_title" "$M_DEPLOY" "$M_MANAGE" "$M_DOWNLOAD_PACKAGES" "$M_DEPS" "$M_UPDATE" "$M_LANG" "$M_UNINSTALL_MENU" "$M_EXIT"
+        local remote_ver_cached=""
+        if [ -f "$REMOTE_VERSION_CACHE" ]; then
+            remote_ver_cached=$(head -n1 "$REMOTE_VERSION_CACHE" 2>/dev/null)
+        fi
+        local main_desc=""
+        local ver_line="${M_VER_LOCAL} v${L4M_VERSION}"
+        if [ -n "$remote_ver_cached" ]; then
+            if [ "$remote_ver_cached" = "$L4M_VERSION" ]; then
+                main_desc="$M_MAIN_MENU\n$ver_line\n${M_VER_REMOTE} v${remote_ver_cached} ${M_VER_REMOTE_UP_TO_DATE}"
+            else
+                main_desc="$M_MAIN_MENU\n$ver_line\n${M_VER_REMOTE} v${remote_ver_cached} ${M_VER_REMOTE_NEED_UPDATE}"
+            fi
+        else
+            main_desc="$M_MAIN_MENU\n$ver_line\n$M_VER_REMOTE_UNKNOWN"
+        fi
+        tui_menu "$main_desc" "$M_DEPLOY" "$M_MANAGE" "$M_DOWNLOAD_PACKAGES" "$M_DEPS" "$M_UPDATE" "$M_LANG" "$M_UNINSTALL_MENU" "$M_EXIT"
         case $? in
             0) deploy_wizard ;; 1) manage_menu ;; 2) download_packages ;; 3) dep_manager_menu ;; 4) self_update ;; 5) change_lang ;; 6) uninstall_menu ;; 7|255) exit 0 ;;
         esac
